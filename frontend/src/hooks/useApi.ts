@@ -29,19 +29,43 @@ function getActualSpeed(uiSpeed: number, language: string): number {
   return SPEED_MAP[uiSpeed] || 0.72
 }
 
-// Unlock audio on mobile - call on first user interaction
+// Web Audio API context for mobile - more reliable than HTMLAudioElement
+let audioContext: AudioContext | null = null
 let audioUnlocked = false
+
 export function unlockAudio() {
-  if (audioUnlocked) return
+  if (audioUnlocked && audioContext) return
   
-  // Create and play a silent audio to unlock audio context on mobile
-  const silentAudio = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV////////////////////////////////////////////AAAAAExhdmM1OC4xMwAAAAAAAAAAAAAAACQAAAAAAAAAAQGwmInQUwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/+M4wAAIAAL+AAAAAANIAKACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=')
-  silentAudio.play().then(() => {
+  try {
+    // Create or resume AudioContext
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+    }
+    
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    }
+    
+    // Also play a silent sound with HTMLAudioElement as backup
+    const silentAudio = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAA5TEFNRTMuMTAwAc0AAAAAAAAAABSAJAiqQgAAgAAAYYTX7sEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=')
+    silentAudio.play().catch(() => {})
+    
     audioUnlocked = true
-    console.log('[Audio] Mobile audio unlocked')
-  }).catch(() => {
-    // Ignore errors - this is just an unlock attempt
-  })
+    console.log('[Audio] Mobile audio unlocked, context state:', audioContext.state)
+  } catch (e) {
+    console.error('[Audio] Failed to unlock:', e)
+  }
+}
+
+// Get or create audio context
+function getAudioContext(): AudioContext {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+  }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume()
+  }
+  return audioContext
 }
 
 // Stop all audio immediately (for interruption)
@@ -265,36 +289,58 @@ export function useApi() {
       const audioBlob = new Blob([audioArray], { type: 'audio/mp3' })
       const audioUrl = URL.createObjectURL(audioBlob)
 
-      await new Promise<void>((resolve) => {
-        const audio = new Audio(audioUrl)
-        currentAudio = audio
+      // Try Web Audio API first (more reliable on mobile), fallback to HTMLAudioElement
+      try {
+        const ctx = getAudioContext()
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
         
-        // Mobile-specific: ensure audio can play
-        audio.setAttribute('playsinline', 'true')
-        audio.preload = 'auto'
-
-        audio.onended = () => {
-          setIsAiSpeaking(false)
-          URL.revokeObjectURL(audioUrl)
-          currentAudio = null
-          resolve()
-        }
-
-        audio.onerror = (e) => {
-          console.error('[TTS] Audio error:', e)
-          setIsAiSpeaking(false)
-          URL.revokeObjectURL(audioUrl)
-          currentAudio = null
-          resolve()
-        }
-
-        audio.play().catch((err) => {
-          console.error('[TTS] Play failed:', err)
-          setIsAiSpeaking(false)
-          currentAudio = null
-          resolve()
+        const source = ctx.createBufferSource()
+        source.buffer = audioBuffer
+        source.connect(ctx.destination)
+        
+        await new Promise<void>((resolve) => {
+          source.onended = () => {
+            setIsAiSpeaking(false)
+            URL.revokeObjectURL(audioUrl)
+            resolve()
+          }
+          source.start(0)
+          console.log('[TTS] Playing via Web Audio API')
         })
-      })
+      } catch (webAudioError) {
+        console.log('[TTS] Web Audio failed, trying HTMLAudioElement:', webAudioError)
+        
+        // Fallback to HTMLAudioElement
+        await new Promise<void>((resolve) => {
+          const audio = new Audio(audioUrl)
+          currentAudio = audio
+          audio.setAttribute('playsinline', 'true')
+          audio.preload = 'auto'
+
+          audio.onended = () => {
+            setIsAiSpeaking(false)
+            URL.revokeObjectURL(audioUrl)
+            currentAudio = null
+            resolve()
+          }
+
+          audio.onerror = (e) => {
+            console.error('[TTS] Audio error:', e)
+            setIsAiSpeaking(false)
+            URL.revokeObjectURL(audioUrl)
+            currentAudio = null
+            resolve()
+          }
+
+          audio.play().catch((err) => {
+            console.error('[TTS] Play failed:', err)
+            setIsAiSpeaking(false)
+            currentAudio = null
+            resolve()
+          })
+        })
+      }
     } catch (err) {
       console.error('Fallback TTS error:', err)
       setIsAiSpeaking(false)
