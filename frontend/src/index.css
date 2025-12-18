@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #ed7424;
+  --color-accent: #22c563;
+  --color-surface: #1c1917;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
+  color: #fafafa;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+/* Disable pull-to-refresh on mobile */
+html {
+  overscroll-behavior: none;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #44403c;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #57534e;
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 60px rgba(237, 116, 36, 0.3),
+              0 0 100px rgba(237, 116, 36, 0.1);
+}
+
+.glow-accent {
+  box-shadow: 0 0 60px rgba(34, 197, 99, 0.3),
+              0 0 100px rgba(34, 197, 99, 0.1);
+}
+
+.glow-speaking {
+  box-shadow: 0 0 80px rgba(237, 116, 36, 0.5),
+              0 0 120px rgba(237, 116, 36, 0.3),
+              0 0 160px rgba(237, 116, 36, 0.1);
+}
+
+/* Animated gradient background */
+.animated-gradient {
+  background: linear-gradient(
+    -45deg,
+    #0c0a09,
+    #1c1917,
+    #292524,
+    #1c1917
+  );
+  background-size: 400% 400%;
+  animation: gradientMove 15s ease infinite;
+}
+
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Speaking visualization */
+.speaking-ring {
+  animation: speakingPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes speakingPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+/* Waveform animation */
+.waveform-bar {
+  animation: waveform 0.5s ease-in-out infinite;
+}
+
+@keyframes waveform {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+/* Text gradient */
+.text-gradient {
+  background: linear-gradient(135deg, #f19147 0%, #ed7424 50%, #de5a1a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Button hover effects */
+.btn-primary {
+  background: linear-gradient(135deg, #f19147 0%, #ed7424 100%);
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px rgba(237, 116, 36, 0.4);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Floating shapes */
+.floating-shape {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.15;
+  pointer-events: none;
+}
+
