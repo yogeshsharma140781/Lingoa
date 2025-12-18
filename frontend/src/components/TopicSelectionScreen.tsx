@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { ArrowLeft, Sparkles } from 'lucide-react'
 import { useStore, TOPICS } from '../store'
+import { unlockAudio } from '../hooks/useApi'
 
 export function TopicSelectionScreen() {
   const { 
@@ -10,11 +11,13 @@ export function TopicSelectionScreen() {
   } = useStore()
 
   const handleTopicSelect = (topicId: string) => {
+    unlockAudio() // Unlock audio on mobile before conversation
     setSelectedTopic(topicId)
     setScreen('conversation')
   }
 
   const handleSkip = () => {
+    unlockAudio() // Unlock audio on mobile before conversation
     // Random topic if skipped
     const randomTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)]
     setSelectedTopic(randomTopic.id)

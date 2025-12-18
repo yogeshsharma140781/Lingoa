@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Flame, Play, ChevronDown, Check, Mic, Globe } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
+import { unlockAudio } from '../hooks/useApi'
 
 export function HomeScreen() {
   const {
@@ -115,7 +116,10 @@ export function HomeScreen() {
         className="w-full pb-8"
       >
         <button
-          onClick={() => setScreen('topics')}
+          onClick={() => {
+            unlockAudio() // Unlock audio on mobile before navigating
+            setScreen('topics')
+          }}
           className="w-full btn-primary rounded-2xl py-5 flex items-center justify-center gap-3 font-semibold text-lg text-white shadow-lg"
         >
           <Play className="w-6 h-6" fill="currentColor" />

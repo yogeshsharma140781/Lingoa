@@ -29,6 +29,21 @@ function getActualSpeed(uiSpeed: number, language: string): number {
   return SPEED_MAP[uiSpeed] || 0.72
 }
 
+// Unlock audio on mobile - call on first user interaction
+let audioUnlocked = false
+export function unlockAudio() {
+  if (audioUnlocked) return
+  
+  // Create and play a silent audio to unlock audio context on mobile
+  const silentAudio = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV////////////////////////////////////////////AAAAAExhdmM1OC4xMwAAAAAAAAAAAAAAACQAAAAAAAAAAQGwmInQUwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/+M4wAAIAAL+AAAAAANIAKACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=')
+  silentAudio.play().then(() => {
+    audioUnlocked = true
+    console.log('[Audio] Mobile audio unlocked')
+  }).catch(() => {
+    // Ignore errors - this is just an unlock attempt
+  })
+}
+
 // Stop all audio immediately (for interruption)
 export function stopAllAudio() {
   if (currentAudio) {
@@ -253,6 +268,10 @@ export function useApi() {
       await new Promise<void>((resolve) => {
         const audio = new Audio(audioUrl)
         currentAudio = audio
+        
+        // Mobile-specific: ensure audio can play
+        audio.setAttribute('playsinline', 'true')
+        audio.preload = 'auto'
 
         audio.onended = () => {
           setIsAiSpeaking(false)
@@ -261,14 +280,16 @@ export function useApi() {
           resolve()
         }
 
-        audio.onerror = () => {
+        audio.onerror = (e) => {
+          console.error('[TTS] Audio error:', e)
           setIsAiSpeaking(false)
           URL.revokeObjectURL(audioUrl)
           currentAudio = null
           resolve()
         }
 
-        audio.play().catch(() => {
+        audio.play().catch((err) => {
+          console.error('[TTS] Play failed:', err)
           setIsAiSpeaking(false)
           currentAudio = null
           resolve()
