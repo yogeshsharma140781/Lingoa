@@ -517,7 +517,11 @@ async def start_session(data: SessionStart):
     """Start a new speaking session"""
     session_id = str(uuid.uuid4())
     
-    print(f"[SESSION START] Language: {data.target_language}, Topic: {data.topic}, Roleplay: {data.roleplay_id}, Custom: {data.custom_scenario}")
+    # Handle None values properly
+    roleplay_id = data.roleplay_id if data.roleplay_id else None
+    custom_scenario = data.custom_scenario if data.custom_scenario else None
+    
+    print(f"[SESSION START] Language: {data.target_language}, Topic: {data.topic}, Roleplay: {roleplay_id}, Custom: {custom_scenario}")
     
     try:
         # Generate greeting - role-play or topic-based
