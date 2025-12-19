@@ -134,28 +134,56 @@ export function useApi() {
       // Determine if this is role-play or topic mode
       const isRoleplay = selectedRoleplayId !== null || customScenario !== null
       
-      const res = await fetch(`${API_BASE}/session/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          target_language: targetLanguage,
-          topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
-          roleplay_id: selectedRoleplayId || null,
-          custom_scenario: customScenario || null,
-        }),
+      console.log('[API] Starting session:', {
+        isRoleplay,
+        roleplayId: selectedRoleplayId,
+        customScenario: customScenario,
+        topic: selectedTopic
       })
+      
+      // Add timeout
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+      
+      try {
+        const res = await fetch(`${API_BASE}/session/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            target_language: targetLanguage,
+            topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
+            roleplay_id: selectedRoleplayId || null,
+            custom_scenario: customScenario || null,
+          }),
+          signal: controller.signal
+        })
+        
+        clearTimeout(timeoutId)
 
-      if (res.ok) {
-        const data = await res.json()
-        setSessionId(data.session_id)
-        setAiMessage(data.greeting)
-        return data
+        if (res.ok) {
+          const data = await res.json()
+          console.log('[API] Session started:', data.session_id)
+          setSessionId(data.session_id)
+          setAiMessage(data.greeting)
+          return data
+        } else {
+          const errorText = await res.text()
+          console.error('[API] Session start failed:', res.status, errorText)
+          throw new Error(`Failed to start session: ${res.status} - ${errorText}`)
+        }
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId)
+        if (fetchErr.name === 'AbortError') {
+          console.error('[API] Session start timeout')
+          throw new Error('Request timed out. Please try again.')
+        }
+        throw fetchErr
       }
-    } catch (err) {
-      console.error('Failed to start session:', err)
+    } catch (err: any) {
+      console.error('[API] Failed to start session:', err)
+      throw err
     }
-    return null
   }, [userId, targetLanguage, selectedTopic, selectedRoleplayId, customScenario, setSessionId, setAiMessage])
 
   // End session and get feedback

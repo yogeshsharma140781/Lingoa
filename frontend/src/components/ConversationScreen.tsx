@@ -48,6 +48,7 @@ export function ConversationScreen() {
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
   const [permissionState, setPermissionState] = useState<'checking' | 'prompt' | 'requesting' | 'granted' | 'denied'>('checking')
   const [isWaitingForUser, setIsWaitingForUser] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
   const [isCorrectionExpanded, setIsCorrectionExpanded] = useState(false)
   
   const timerIntervalRef = useRef<number | null>(null)
@@ -145,18 +146,31 @@ export function ConversationScreen() {
     
     resetSpeakingTime()
     setUserTranscript('')
+    setIsProcessing(true)
+    setStartError(null)
     
-    const session = await startSession()
-    if (session) {
-      setIsInitialized(true)
-      
-      if (session.greeting) {
-        await textToSpeech(session.greeting)
+    try {
+      const session = await startSession()
+      if (session) {
+        setIsInitialized(true)
+        setIsProcessing(false)
+        
+        if (session.greeting) {
+          await textToSpeech(session.greeting)
+        }
+        
+        // Start recording and set waiting for user
+        startRecording()
+        setIsWaitingForUser(true)
+      } else {
+        throw new Error('Session start returned no data')
       }
-      
-      // Start recording and set waiting for user
-      startRecording()
-      setIsWaitingForUser(true)
+    } catch (error: any) {
+      console.error('Failed to start conversation:', error)
+      setIsProcessing(false)
+      setIsInitialized(false)
+      setStartError(error.message || 'Failed to start conversation. Please try again.')
+      initRef.current = false // Allow retry
     }
   }
 
@@ -645,10 +659,28 @@ export function ConversationScreen() {
           )}
 
           {/* Starting */}
-          {!isInitialized && (
+          {!isInitialized && !startError && (
             <span className="text-surface-400">
               Starting conversation...
             </span>
+          )}
+          
+          {/* Error */}
+          {startError && (
+            <div className="text-center space-y-3">
+              <span className="text-red-400 block">
+                {startError}
+              </span>
+              <button
+                onClick={() => {
+                  setStartError(null)
+                  startConversation()
+                }}
+                className="btn-primary rounded-xl px-6 py-2 text-sm font-medium"
+              >
+                Try Again
+              </button>
+            </div>
           )}
         </div>
 

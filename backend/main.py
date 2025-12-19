@@ -513,37 +513,51 @@ async def start_session(data: SessionStart):
     """Start a new speaking session"""
     session_id = str(uuid.uuid4())
     
-    # Generate greeting - role-play or topic-based
-    if data.topic == "roleplay":
-        greeting = await generate_roleplay_greeting(
-            data.target_language, 
-            data.roleplay_id, 
-            data.custom_scenario
-        )
-    else:
-        greeting = await generate_greeting(data.target_language, data.topic)
+    print(f"[SESSION START] Language: {data.target_language}, Topic: {data.topic}, Roleplay: {data.roleplay_id}, Custom: {data.custom_scenario}")
     
-    sessions[session_id] = {
-        "id": session_id,
-        "user_id": data.user_id,
-        "target_language": data.target_language,
-        "topic": data.topic,
-        "roleplay_id": data.roleplay_id,
-        "custom_scenario": data.custom_scenario,
-        "started_at": datetime.now().isoformat(),
-        "messages": [
-            {"role": "assistant", "content": greeting}
-        ],
-        "user_utterances": [],
-        "completed": False
-    }
-    
-    return {
-        "session_id": session_id,
-        "greeting": greeting,
-        "target_language": data.target_language,
-        "topic": data.topic
-    }
+    try:
+        # Generate greeting - role-play or topic-based
+        if data.topic == "roleplay":
+            print(f"[SESSION START] Generating role-play greeting...")
+            greeting = await generate_roleplay_greeting(
+                data.target_language, 
+                data.roleplay_id, 
+                data.custom_scenario
+            )
+            print(f"[SESSION START] Role-play greeting generated: {greeting[:50]}...")
+        else:
+            print(f"[SESSION START] Generating topic greeting...")
+            greeting = await generate_greeting(data.target_language, data.topic)
+            print(f"[SESSION START] Topic greeting generated: {greeting[:50]}...")
+        
+        sessions[session_id] = {
+            "id": session_id,
+            "user_id": data.user_id,
+            "target_language": data.target_language,
+            "topic": data.topic,
+            "roleplay_id": data.roleplay_id,
+            "custom_scenario": data.custom_scenario,
+            "started_at": datetime.now().isoformat(),
+            "messages": [
+                {"role": "assistant", "content": greeting}
+            ],
+            "user_utterances": [],
+            "completed": False
+        }
+        
+        print(f"[SESSION START] Session created: {session_id}")
+        
+        return {
+            "session_id": session_id,
+            "greeting": greeting,
+            "target_language": data.target_language,
+            "topic": data.topic
+        }
+    except Exception as e:
+        print(f"[SESSION START ERROR] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to start session: {str(e)}")
 
 @app.post("/api/session/end")
 async def end_session(data: SessionEnd):
@@ -1361,27 +1375,32 @@ TOPIC_GREETINGS = {
 async def generate_roleplay_greeting(language: str, scenario_id: str = None, custom_scenario: str = None) -> str:
     """Generate role-play opening - AI speaks immediately in character"""
     if custom_scenario:
-        # Use LLM to generate immediate in-character opening for custom scenario
-        try:
-            prompt = get_roleplay_prompt(language, "", custom_scenario)
-            response = await client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": "Start the conversation immediately."}
-                ],
-                max_tokens=30,
-                temperature=0.8
-            )
-            greeting = response.choices[0].message.content.strip()
-            # Remove any quotes if LLM added them
-            greeting = greeting.strip('"').strip("'")
-            return greeting
-        except Exception as e:
-            print(f"[ROLEPLAY] Error generating custom greeting: {e}")
-            # Fallback to generic
-            if language == "hi":
-                return "नमस्ते! कैसे मदद कर सकता हूँ?"
+        # For custom scenarios, use a simple generic greeting
+        # The conversation prompt will handle the in-character behavior
+        print(f"[ROLEPLAY] Custom scenario: {custom_scenario[:50]}...")
+        
+        # Simple, natural greetings that work for any scenario
+        if language == "hi":
+            return "नमस्ते! कैसे मदद कर सकता हूँ?"
+        elif language == "es":
+            return "¡Hola! ¿En qué puedo ayudarte?"
+        elif language == "fr":
+            return "Bonjour! Comment puis-je vous aider?"
+        elif language == "de":
+            return "Hallo! Wie kann ich Ihnen helfen?"
+        elif language == "nl":
+            return "Hallo! Hoe kan ik je helpen?"
+        elif language == "it":
+            return "Ciao! Come posso aiutarti?"
+        elif language == "pt":
+            return "Olá! Como posso ajudar?"
+        elif language == "zh":
+            return "你好！我能帮你什么吗？"
+        elif language == "ja":
+            return "こんにちは！何かお手伝いできることはありますか？"
+        elif language == "ko":
+            return "안녕하세요! 어떻게 도와드릴까요?"
+        else:
             return "Hello! How can I help you?"
     
     # Built-in scenario greetings (in-character, immediate)
