@@ -25,6 +25,14 @@ from openai import AsyncOpenAI
 
 load_dotenv()
 
+# Import TTS provider (ElevenLabs primary, OpenAI fallback)
+from tts_provider import (
+    get_tts_provider, 
+    preprocess_text_for_speech,
+    chunk_text_for_streaming,
+    ElevenLabsTTSProvider
+)
+
 # Check if we're in production (frontend is built)
 FRONTEND_BUILD_PATH = Path(__file__).parent.parent / "frontend" / "dist"
 IS_PRODUCTION = FRONTEND_BUILD_PATH.exists()
@@ -610,17 +618,24 @@ async def get_thinking_filler(data: FillerRequest):
         
         filler_text = random.choice(available_fillers)
         
-        voice = VOICE_MAP.get(data.language, "nova")
+        # Use ElevenLabs if available, otherwise OpenAI
+        try:
+            tts = get_tts_provider(client)
+            audio_content = await tts.generate_speech(filler_text, data.language, data.speed)
+            response_content = audio_content
+        except Exception as e:
+            print(f"[FILLER] ElevenLabs failed, using OpenAI: {e}")
+            voice = VOICE_MAP.get(data.language, "nova")
+            response = await client.audio.speech.create(
+                model="tts-1",
+                voice=voice,
+                input=filler_text,
+                speed=data.speed,
+                response_format="mp3"
+            )
+            response_content = response.content
         
-        response = await client.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=filler_text,
-            speed=data.speed,
-            response_format="mp3"
-        )
-        
-        audio_base64 = base64.b64encode(response.content).decode('utf-8')
+        audio_base64 = base64.b64encode(response_content).decode('utf-8')
         
         return {
             "audio": audio_base64,
@@ -632,7 +647,7 @@ async def get_thinking_filler(data: FillerRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 def add_pauses_for_hindi(text: str) -> str:
-    """Add natural pauses to Hindi text for better TTS output"""
+    """Add natural pauses to Hindi text for better TTS output (legacy, used by OpenAI fallback)"""
     # Add pause markers after sentence endings
     text = re.sub(r'([।?!])\s*', r'\1... ', text)
     # Add slight pause after commas
@@ -643,29 +658,21 @@ def add_pauses_for_hindi(text: str) -> str:
 
 @app.post("/api/tts")
 async def text_to_speech(data: TextToSpeechRequest):
-    """Generate speech from text using OpenAI TTS"""
-    text_to_speak = data.text
-    
-    # Add pauses for Hindi to make it sound more natural
-    if data.language == "hi":
-        text_to_speak = add_pauses_for_hindi(data.text)
-    
-    print(f"[TTS] Generating audio for: {text_to_speak}")
+    """Generate speech from text using ElevenLabs (primary) or OpenAI (fallback)"""
+    print(f"[TTS] Generating audio for: {data.text[:80]}...")
     print(f"[TTS] Language: {data.language}, Speed: {data.speed}")
     
     try:
-        voice = VOICE_MAP.get(data.language, "nova")
-        print(f"[TTS] Using voice: {voice}")
+        # Get the TTS provider (ElevenLabs if API key available, else OpenAI)
+        tts = get_tts_provider(client)
         
-        response = await client.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=text_to_speak,
-            speed=data.speed,
-            response_format="mp3"
+        # Generate speech (provider handles pre-processing)
+        audio_content = await tts.generate_speech(
+            text=data.text,
+            language=data.language,
+            speed=data.speed
         )
         
-        audio_content = response.content
         audio_base64 = base64.b64encode(audio_content).decode('utf-8')
         
         print(f"[TTS] Generated {len(audio_content)} bytes of audio")
@@ -673,6 +680,63 @@ async def text_to_speech(data: TextToSpeechRequest):
         
     except Exception as e:
         print(f"[TTS ERROR] {e}")
+        # Try OpenAI fallback if ElevenLabs fails
+        try:
+            print("[TTS] Trying OpenAI fallback...")
+            text_to_speak = data.text
+            if data.language == "hi":
+                text_to_speak = add_pauses_for_hindi(data.text)
+            
+            voice = VOICE_MAP.get(data.language, "nova")
+            response = await client.audio.speech.create(
+                model="tts-1",
+                voice=voice,
+                input=text_to_speak,
+                speed=data.speed,
+                response_format="mp3"
+            )
+            
+            audio_base64 = base64.b64encode(response.content).decode('utf-8')
+            return {"audio": audio_base64, "format": "mp3"}
+        except Exception as fallback_error:
+            print(f"[TTS FALLBACK ERROR] {fallback_error}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/tts/elevenlabs/stream")
+async def elevenlabs_stream_tts(data: TextToSpeechRequest):
+    """Stream TTS using ElevenLabs for minimal latency - audio starts playing immediately"""
+    print(f"[TTS STREAM] Starting stream for: {data.text[:80]}...")
+    
+    try:
+        tts = get_tts_provider(client)
+        
+        # Only ElevenLabs supports true streaming
+        if not isinstance(tts, ElevenLabsTTSProvider):
+            # Fallback to regular TTS
+            audio = await tts.generate_speech(data.text, data.language, data.speed)
+            async def single_chunk():
+                yield audio
+            return StreamingResponse(
+                single_chunk(),
+                media_type="audio/mpeg"
+            )
+        
+        async def audio_stream():
+            async for chunk in tts.stream_speech(data.text, data.language, data.speed):
+                yield chunk
+        
+        return StreamingResponse(
+            audio_stream(),
+            media_type="audio/mpeg",
+            headers={
+                "Content-Type": "audio/mpeg",
+                "Transfer-Encoding": "chunked",
+                "Cache-Control": "no-cache",
+            }
+        )
+        
+    except Exception as e:
+        print(f"[TTS STREAM ERROR] {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============ Real-time Corrections ============
