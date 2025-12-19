@@ -146,16 +146,25 @@ export function useApi() {
       const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
       
       try {
+        // Build request body - only include non-null values
+        const requestBody: any = {
+          user_id: userId,
+          target_language: targetLanguage,
+          topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
+        }
+        
+        // Only add roleplay fields if they have values
+        if (selectedRoleplayId) {
+          requestBody.roleplay_id = selectedRoleplayId
+        }
+        if (customScenario) {
+          requestBody.custom_scenario = customScenario
+        }
+        
         const res = await fetch(`${API_BASE}/session/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: userId,
-            target_language: targetLanguage,
-            topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
-            roleplay_id: selectedRoleplayId || null,
-            custom_scenario: customScenario || null,
-          }),
+          body: JSON.stringify(requestBody),
           signal: controller.signal
         })
         

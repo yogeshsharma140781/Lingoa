@@ -479,8 +479,12 @@ class SessionStart(BaseModel):
     user_id: str
     target_language: str = "es"  # Default to Spanish
     topic: str = "random"        # Conversation topic (or "roleplay" for role-play mode)
-    roleplay_id: str = None      # Role-play scenario ID (if topic is "roleplay")
-    custom_scenario: str = None  # Custom role-play scenario description
+    roleplay_id: Optional[str] = None      # Role-play scenario ID (if topic is "roleplay")
+    custom_scenario: Optional[str] = None   # Custom role-play scenario description
+    
+    model_config = {
+        "extra": "forbid"  # Don't allow extra fields
+    }
 
 class SessionEnd(BaseModel):
     session_id: str
@@ -521,8 +525,8 @@ async def start_session(data: SessionStart):
             print(f"[SESSION START] Generating role-play greeting...")
             greeting = await generate_roleplay_greeting(
                 data.target_language, 
-                data.roleplay_id, 
-                data.custom_scenario
+                roleplay_id, 
+                custom_scenario
             )
             print(f"[SESSION START] Role-play greeting generated: {greeting[:50]}...")
         else:
@@ -535,8 +539,8 @@ async def start_session(data: SessionStart):
             "user_id": data.user_id,
             "target_language": data.target_language,
             "topic": data.topic,
-            "roleplay_id": data.roleplay_id,
-            "custom_scenario": data.custom_scenario,
+            "roleplay_id": roleplay_id,
+            "custom_scenario": custom_scenario,
             "started_at": datetime.now().isoformat(),
             "messages": [
                 {"role": "assistant", "content": greeting}
