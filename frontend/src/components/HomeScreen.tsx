@@ -69,7 +69,7 @@ export function HomeScreen() {
           <span className="text-gradient">Lingoa</span>
         </h1>
         <p className="text-surface-400 text-lg max-w-xs mb-8">
-          5 minutes of speaking practice. Every day. No lessons, just conversation.
+          Practice language by speaking for 5 minutes. Every day. No lessons, just conversations.
         </p>
 
         {/* Language selector */}
