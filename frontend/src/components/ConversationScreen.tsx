@@ -51,6 +51,7 @@ export function ConversationScreen() {
   const timerIntervalRef = useRef<number | null>(null)
   const lastTickRef = useRef<number>(0)
   const initRef = useRef(false)
+  const isClosingRef = useRef(false) // Prevent multiple close clicks
 
   // Check existing mic permission on mount
   useEffect(() => {
@@ -227,12 +228,28 @@ export function ConversationScreen() {
   }
 
   const handleClose = async () => {
-    stopRecording()
-    if (speakingTime > 0) {
-      await endSession(speakingTime)
+    // Prevent multiple clicks
+    if (isClosingRef.current) return
+    isClosingRef.current = true
+    
+    try {
+      stopRecording()
+      if (speakingTime > 0) {
+        await endSession(speakingTime)
+      }
+      resetSession()
+      setScreen('home')
+    } catch (err) {
+      console.error('Error closing session:', err)
+      // Still navigate home even if there's an error
+      resetSession()
+      setScreen('home')
+    } finally {
+      // Reset after a delay to allow navigation
+      setTimeout(() => {
+        isClosingRef.current = false
+      }, 1000)
     }
-    resetSession()
-    setScreen('home')
   }
 
   const progress = (speakingTime / targetTime) * 100
@@ -410,8 +427,12 @@ export function ConversationScreen() {
       {/* Header */}
       <div className="w-full flex items-center justify-between p-4 pt-6">
         <button
-          onClick={handleClose}
-          className="p-2 rounded-full glass hover:bg-white/10 transition-colors"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleClose()
+          }}
+          disabled={isClosingRef.current}
+          className="p-2 rounded-full glass hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <X className="w-6 h-6 text-surface-400" />
         </button>

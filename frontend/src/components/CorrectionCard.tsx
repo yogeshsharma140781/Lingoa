@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { Volume2, ChevronDown, ChevronUp } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Correction } from '../store'
 
 interface CorrectionCardProps {
@@ -12,6 +12,7 @@ interface CorrectionCardProps {
 export function CorrectionCard({ correction, onDismiss, onExpandChange }: CorrectionCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
+  const isDismissingRef = useRef(false)
 
   // Notify parent when expansion state changes
   useEffect(() => {
@@ -107,7 +108,16 @@ export function CorrectionCard({ correction, onDismiss, onExpandChange }: Correc
 
           {/* Dismiss */}
           <button 
-            onClick={onDismiss}
+            onClick={(e) => {
+              e.stopPropagation() // Prevent triggering parent onClick
+              if (isDismissingRef.current) return // Prevent multiple clicks
+              isDismissingRef.current = true
+              onDismiss()
+              // Reset after a short delay
+              setTimeout(() => {
+                isDismissingRef.current = false
+              }, 300)
+            }}
             className="text-xs text-amber-400/50 hover:text-amber-400 transition-colors"
           >
             Dismiss
