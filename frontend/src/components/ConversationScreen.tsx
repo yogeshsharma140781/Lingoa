@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Volume2, Gauge, MicOff, Mic, Send, Loader2 } from 'lucide-react'
+import { X, Volume2, Gauge, MicOff, Mic, Send, Loader2, VolumeX } from 'lucide-react'
 import { useStore } from '../store'
 import { useApi } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
@@ -29,6 +29,8 @@ export function ConversationScreen() {
     isProcessing,
     setIsProcessing,
     currentCorrection,
+    audioSilentMode,
+    setAudioSilentMode,
   } = useStore()
 
   const { 
@@ -474,6 +476,36 @@ export function ConversationScreen() {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* Silent Mode Warning */}
+      <AnimatePresence>
+        {audioSilentMode && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="w-full px-4 pt-2"
+          >
+            <div className="bg-yellow-900/40 border border-yellow-500/30 rounded-lg p-3 flex items-start gap-3">
+              <VolumeX className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-yellow-200 text-sm font-medium mb-1">
+                  Phone is in Silent Mode
+                </p>
+                <p className="text-yellow-300/80 text-xs leading-relaxed">
+                  Turn off silent mode to hear the AI speak. Flip the silent switch on the side of your phone.
+                </p>
+              </div>
+              <button
+                onClick={() => setAudioSilentMode(false)}
+                className="text-yellow-400/60 hover:text-yellow-400 transition-colors flex-shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main speaking area */}
       <div className="flex-1 flex flex-col items-center justify-start w-full px-6 overflow-y-auto pt-4">

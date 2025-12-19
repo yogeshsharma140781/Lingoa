@@ -110,6 +110,10 @@ interface AppState {
   // Microphone
   micPermission: 'prompt' | 'granted' | 'denied'
   setMicPermission: (status: 'prompt' | 'granted' | 'denied') => void
+  
+  // Audio silent mode detection
+  audioSilentMode: boolean
+  setAudioSilentMode: (silent: boolean) => void
 
   // Reset
   resetSession: () => void
@@ -199,6 +203,10 @@ export const useStore = create<AppState>((set) => ({
   // Microphone
   micPermission: 'prompt',
   setMicPermission: (status) => set({ micPermission: status }),
+  
+  // Audio silent mode detection
+  audioSilentMode: false,
+  setAudioSilentMode: (silent) => set({ audioSilentMode: silent }),
 
   // Reset
   resetSession: () => set({

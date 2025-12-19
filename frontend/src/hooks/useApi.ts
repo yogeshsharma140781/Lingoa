@@ -110,6 +110,7 @@ export function useApi() {
     audioSpeed,
     setCurrentCorrection,
     selectedTopic,
+    setAudioSilentMode,
   } = useStore()
 
   // Fetch user stats
@@ -322,16 +323,39 @@ export function useApi() {
         source.connect(ctx.destination)
         
         await new Promise<void>((resolve) => {
+          let playbackStarted = false
+          
           source.onended = () => {
             setIsAiSpeaking(false)
             URL.revokeObjectURL(audioUrl)
             resolve()
           }
-          source.start(0)
-          console.log(`[TTS] Playing via Web Audio API at ${playbackRate}x speed`)
+          
+          // Check if audio actually started playing
+          const checkPlayback = setTimeout(() => {
+            if (!playbackStarted) {
+              console.warn('[TTS] Audio may not be playing - possible silent mode')
+              setAudioSilentMode(true)
+            }
+          }, 500)
+          
+          try {
+            source.start(0)
+            playbackStarted = true
+            clearTimeout(checkPlayback)
+            console.log(`[TTS] Playing via Web Audio API at ${playbackRate}x speed`)
+          } catch (startError) {
+            clearTimeout(checkPlayback)
+            console.error('[TTS] Failed to start audio:', startError)
+            setAudioSilentMode(true)
+            setIsAiSpeaking(false)
+            URL.revokeObjectURL(audioUrl)
+            resolve()
+          }
         })
       } catch (webAudioError) {
         console.log('[TTS] Web Audio failed, trying HTMLAudioElement:', webAudioError)
+        setAudioSilentMode(true)
         
         // Fallback to HTMLAudioElement with playbackRate
         await new Promise<void>((resolve) => {
@@ -356,8 +380,12 @@ export function useApi() {
             resolve()
           }
 
-          audio.play().catch((err) => {
-            console.error('[TTS] Play failed:', err)
+          audio.play().then(() => {
+            // Audio started successfully - clear silent mode warning
+            setAudioSilentMode(false)
+          }).catch((err) => {
+            console.error('[TTS] Play failed - likely silent mode:', err)
+            setAudioSilentMode(true)
             setIsAiSpeaking(false)
             currentAudio = null
             resolve()
