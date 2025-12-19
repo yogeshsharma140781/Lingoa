@@ -28,6 +28,7 @@ load_dotenv()
 # Import TTS provider (ElevenLabs primary, OpenAI fallback)
 from tts_provider import (
     get_tts_provider, 
+    get_tts_provider_type,
     preprocess_text_for_speech,
     chunk_text_for_streaming,
     ElevenLabsTTSProvider
@@ -1122,7 +1123,35 @@ async def generate_feedback(session: dict) -> dict:
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "lingoa-api"}
+    """Health check with TTS provider info"""
+    # Initialize TTS provider to see which one is active
+    try:
+        get_tts_provider(client)
+    except:
+        pass
+    
+    return {
+        "status": "healthy", 
+        "service": "lingoa-api",
+        "tts_provider": get_tts_provider_type(),
+        "elevenlabs_key_present": bool(os.getenv("ELEVENLABS_API_KEY"))
+    }
+
+@app.get("/api/tts/status")
+async def tts_status():
+    """Check which TTS provider is active"""
+    try:
+        get_tts_provider(client)
+        provider_type = get_tts_provider_type()
+        elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+        
+        return {
+            "provider": provider_type,
+            "elevenlabs_configured": bool(elevenlabs_key and len(elevenlabs_key) > 10),
+            "key_preview": elevenlabs_key[:15] + "..." if elevenlabs_key else None
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 # ============ Frontend SPA Routes (Production) ============
 

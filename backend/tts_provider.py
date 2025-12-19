@@ -351,27 +351,39 @@ class OpenAITTSProvider(TTSProvider):
 # ============ Provider Factory ============
 
 _tts_provider: Optional[TTSProvider] = None
+_provider_type: str = "none"
 
 def get_tts_provider(openai_client=None) -> TTSProvider:
     """Get the configured TTS provider (singleton)"""
-    global _tts_provider
+    global _tts_provider, _provider_type
     
     if _tts_provider is None:
         elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
         
+        print(f"[TTS INIT] ELEVENLABS_API_KEY present: {bool(elevenlabs_key)}")
         if elevenlabs_key:
-            print("[TTS] Using ElevenLabs provider")
+            print(f"[TTS INIT] Key starts with: {elevenlabs_key[:10]}...")
+        
+        if elevenlabs_key and len(elevenlabs_key) > 10:
+            print("[TTS] ✅ Using ElevenLabs provider")
             _tts_provider = ElevenLabsTTSProvider(elevenlabs_key)
+            _provider_type = "elevenlabs"
         elif openai_client:
-            print("[TTS] Using OpenAI provider (fallback)")
+            print("[TTS] ⚠️ Using OpenAI provider (fallback - no ElevenLabs key)")
             _tts_provider = OpenAITTSProvider(openai_client)
+            _provider_type = "openai"
         else:
             raise ValueError("No TTS provider configured. Set ELEVENLABS_API_KEY or provide OpenAI client.")
     
     return _tts_provider
 
+def get_tts_provider_type() -> str:
+    """Get the current TTS provider type"""
+    return _provider_type
+
 def reset_tts_provider():
-    """Reset the TTS provider (for testing)"""
-    global _tts_provider
+    """Reset the TTS provider (for testing or re-initialization)"""
+    global _tts_provider, _provider_type
     _tts_provider = None
+    _provider_type = "none"
 
