@@ -10,39 +10,39 @@ let recentFillers: string[] = [] // Track recent fillers to avoid repetition
 
 // Map UI speed to actual TTS speed
 // Speed is applied server-side (OpenAI) or client-side playbackRate (ElevenLabs)
-// OpenAI fallback speed map (server-side) - reduced by 10%
+// OpenAI fallback speed map (server-side)
 const OPENAI_SPEED_MAP: Record<number, number> = {
-  0.8: 0.495,  // Slow (0.55 * 0.9)
-  0.9: 0.594,  // Natural (0.66 * 0.9)
-  1.0: 0.648,  // Normal (0.72 * 0.9) - 10% slower
+  0.8: 0.55,  // Slow
+  0.9: 0.66,  // Natural  
+  1.0: 0.72,  // Normal
 }
 
-// Hindi uses moderate TTS speed with natural pauses - reduced by 10%
+// Hindi uses moderate TTS speed with natural pauses
 const HINDI_SPEED_MAP: Record<number, number> = {
-  0.8: 0.63,   // Slow (0.70 * 0.9)
-  0.9: 0.72,   // Natural (0.80 * 0.9)
-  1.0: 0.765,  // Normal (0.85 * 0.9) - 10% slower
+  0.8: 0.70,  // Slow
+  0.9: 0.80,  // Natural
+  1.0: 0.85,  // Normal - still natural with pauses
 }
 
 // Client-side playback speed for ElevenLabs (via playbackRate)
-// ElevenLabs generates at normal speed, we slow it down client-side
+// ElevenLabs generates at normal speed, we can adjust client-side
 const ELEVENLABS_PLAYBACK_RATE: Record<number, number> = {
-  0.8: 0.72,   // Slow (0.8 * 0.9)
-  0.9: 0.81,   // Natural (0.9 * 0.9)
-  1.0: 0.90,   // Normal (1.0 * 0.9) - 10% slower
+  0.8: 0.8,   // Slow
+  0.9: 0.9,   // Natural
+  1.0: 1.0,   // Normal
 }
 
 function getActualSpeed(uiSpeed: number, language: string): number {
   // For OpenAI fallback (server-side speed)
   if (language === 'hi') {
-    return HINDI_SPEED_MAP[uiSpeed] || 0.765
+    return HINDI_SPEED_MAP[uiSpeed] || 0.85
   }
-  return OPENAI_SPEED_MAP[uiSpeed] || 0.648
+  return OPENAI_SPEED_MAP[uiSpeed] || 0.72
 }
 
 function getPlaybackRate(uiSpeed: number): number {
   // For ElevenLabs (client-side playbackRate)
-  return ELEVENLABS_PLAYBACK_RATE[uiSpeed] || 0.90
+  return ELEVENLABS_PLAYBACK_RATE[uiSpeed] || 1.0
 }
 
 // Web Audio API context for mobile - more reliable than HTMLAudioElement
