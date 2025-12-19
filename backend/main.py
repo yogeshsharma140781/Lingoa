@@ -663,10 +663,11 @@ async def text_to_speech(data: TextToSpeechRequest):
     print(f"[TTS] Generating audio for: {data.text[:80]}...")
     print(f"[TTS] Language: {data.language}, Speed: {data.speed}")
     
-    # Always try ElevenLabs first if configured, then fallback to OpenAI
+    # Try ElevenLabs first if configured, then fallback to OpenAI
     elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+    use_elevenlabs = elevenlabs_key and len(elevenlabs_key) > 10 and os.getenv("DISABLE_ELEVENLABS") != "true"
     
-    if elevenlabs_key and len(elevenlabs_key) > 10:
+    if use_elevenlabs:
         try:
             print("[TTS] Attempting ElevenLabs...")
             tts = get_tts_provider(client)
@@ -685,7 +686,13 @@ async def text_to_speech(data: TextToSpeechRequest):
             else:
                 print("[TTS] Provider is not ElevenLabs, using OpenAI")
         except Exception as e:
-            print(f"[TTS ERROR] ElevenLabs failed: {e}")
+            error_msg = str(e)
+            print(f"[TTS ERROR] ElevenLabs failed: {error_msg}")
+            
+            # If it's a 401 (blocked account), suggest disabling ElevenLabs
+            if "401" in error_msg or "blocked" in error_msg.lower() or "unusual activity" in error_msg.lower():
+                print("[TTS] ⚠️ ElevenLabs account appears blocked. Set DISABLE_ELEVENLABS=true to skip ElevenLabs.")
+            
             print("[TTS] Falling back to OpenAI...")
     
     # OpenAI fallback (always available)
@@ -715,39 +722,59 @@ async def text_to_speech(data: TextToSpeechRequest):
 
 @app.post("/api/tts/elevenlabs/stream")
 async def elevenlabs_stream_tts(data: TextToSpeechRequest):
-    """Stream TTS using ElevenLabs for minimal latency - audio starts playing immediately"""
+    """Stream TTS using ElevenLabs for minimal latency - falls back to OpenAI if ElevenLabs fails"""
     print(f"[TTS STREAM] Starting stream for: {data.text[:80]}...")
     
     try:
         tts = get_tts_provider(client)
         
         # Only ElevenLabs supports true streaming
-        if not isinstance(tts, ElevenLabsTTSProvider):
-            # Fallback to regular TTS
-            audio = await tts.generate_speech(data.text, data.language, data.speed)
-            async def single_chunk():
-                yield audio
-            return StreamingResponse(
-                single_chunk(),
-                media_type="audio/mpeg"
-            )
+        if isinstance(tts, ElevenLabsTTSProvider):
+            try:
+                async def audio_stream():
+                    async for chunk in tts.stream_speech(data.text, data.language, data.speed):
+                        yield chunk
+                
+                return StreamingResponse(
+                    audio_stream(),
+                    media_type="audio/mpeg",
+                    headers={
+                        "Content-Type": "audio/mpeg",
+                        "Transfer-Encoding": "chunked",
+                        "Cache-Control": "no-cache",
+                    }
+                )
+            except Exception as e:
+                print(f"[TTS STREAM] ElevenLabs failed: {e}, falling back to OpenAI...")
+                # Fall through to OpenAI fallback
         
-        async def audio_stream():
-            async for chunk in tts.stream_speech(data.text, data.language, data.speed):
-                yield chunk
+        # Fallback to OpenAI (non-streaming)
+        print("[TTS STREAM] Using OpenAI fallback (non-streaming)...")
+        text_to_speak = data.text
+        if data.language == "hi":
+            text_to_speak = add_pauses_for_hindi(data.text)
+        
+        voice = VOICE_MAP.get(data.language, "nova")
+        response = await client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text_to_speak,
+            speed=data.speed,
+            response_format="mp3"
+        )
+        
+        async def single_chunk():
+            yield response.content
         
         return StreamingResponse(
-            audio_stream(),
-            media_type="audio/mpeg",
-            headers={
-                "Content-Type": "audio/mpeg",
-                "Transfer-Encoding": "chunked",
-                "Cache-Control": "no-cache",
-            }
+            single_chunk(),
+            media_type="audio/mpeg"
         )
         
     except Exception as e:
         print(f"[TTS STREAM ERROR] {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============ Real-time Corrections ============

@@ -247,6 +247,11 @@ class ElevenLabsTTSProvider(TTSProvider):
             if response.status_code != 200:
                 error_text = response.text[:500] if hasattr(response, 'text') else str(response.content[:500])
                 print(f"[ELEVENLABS ERROR] Status {response.status_code}: {error_text}")
+                
+                # If it's a 401 (unauthorized/blocked), raise a specific exception
+                if response.status_code == 401:
+                    raise Exception(f"ElevenLabs account blocked or invalid API key. Status {response.status_code}: {error_text}")
+                
                 raise Exception(f"ElevenLabs API error: {response.status_code} - {error_text}")
             
             if not response.content or len(response.content) == 0:
