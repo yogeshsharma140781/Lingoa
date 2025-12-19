@@ -1,7 +1,21 @@
 import { useCallback } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { useStore, Improvement, Correction } from '../store'
 
-const API_BASE = '/api'
+// API base URL - use full URL for iOS, relative for web
+const getApiBase = () => {
+  if (Capacitor.isNativePlatform()) {
+    // For iOS, use the backend URL from environment or Capacitor config
+    // Update this with your actual Render backend URL (e.g., 'https://lingoa-xxxx.onrender.com')
+    // You can also set it via Capacitor config server.url
+    const backendUrl = (window as any).__API_URL__ || 'https://lingoa.onrender.com'
+    return `${backendUrl}/api`
+  }
+  // For web, use relative URL (works with proxy in dev, or same origin in prod)
+  return '/api'
+}
+
+const API_BASE = getApiBase()
 
 // Module-level audio tracking for interruptibility
 let currentAudio: HTMLAudioElement | null = null

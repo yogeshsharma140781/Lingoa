@@ -6,14 +6,24 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:ios": "npx cap sync ios && npx cap open ios",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:copy": "npx cap copy",
+    "cap:update": "npx cap update"
   },
   "dependencies": {
+    "@capacitor/app": "^7.1.1",
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
+    "@capacitor/ios": "^7.4.4",
+    "@capacitor/preferences": "^7.0.3",
+    "@capacitor/status-bar": "^7.0.4",
+    "framer-motion": "^11.0.3",
+    "lucide-react": "^0.321.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "framer-motion": "^11.0.3",
-    "zustand": "^4.5.0",
-    "lucide-react": "^0.321.0"
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.55",
@@ -26,4 +36,3 @@
     "vite": "^5.1.0"
   }
 }
-
