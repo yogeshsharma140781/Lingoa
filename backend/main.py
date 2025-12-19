@@ -1176,17 +1176,45 @@ async def health_check():
 
 @app.get("/api/tts/status")
 async def tts_status():
-    """Check which TTS provider is active"""
+    """Check which TTS provider is active and test ElevenLabs if configured"""
     try:
         get_tts_provider(client)
         provider_type = get_tts_provider_type()
         elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+        disable_flag = os.getenv("DISABLE_ELEVENLABS")
         
-        return {
+        result = {
             "provider": provider_type,
             "elevenlabs_configured": bool(elevenlabs_key and len(elevenlabs_key) > 10),
+            "elevenlabs_disabled": disable_flag == "true",
             "key_preview": elevenlabs_key[:15] + "..." if elevenlabs_key else None
         }
+        
+        # Test ElevenLabs API if configured
+        if elevenlabs_key and len(elevenlabs_key) > 10 and disable_flag != "true":
+            try:
+                import httpx
+                async with httpx.AsyncClient() as http_client:
+                    # Test by getting user info (lightweight check)
+                    test_response = await http_client.get(
+                        "https://api.elevenlabs.io/v1/user",
+                        headers={"xi-api-key": elevenlabs_key},
+                        timeout=5.0
+                    )
+                    if test_response.status_code == 200:
+                        user_data = test_response.json()
+                        result["elevenlabs_status"] = "active"
+                        result["elevenlabs_subscription"] = user_data.get("subscription", {}).get("tier", "unknown")
+                    elif test_response.status_code == 401:
+                        result["elevenlabs_status"] = "blocked_or_invalid"
+                        result["elevenlabs_error"] = "API key invalid or account blocked"
+                    else:
+                        result["elevenlabs_status"] = f"error_{test_response.status_code}"
+            except Exception as e:
+                result["elevenlabs_status"] = "test_failed"
+                result["elevenlabs_error"] = str(e)[:100]
+        
+        return result
     except Exception as e:
         return {"error": str(e)}
 

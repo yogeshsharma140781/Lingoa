@@ -198,8 +198,11 @@ class ElevenLabsTTSProvider(TTSProvider):
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY")
+        if not self.api_key:
+            raise ValueError("ElevenLabs API key not provided")
         self.base_url = "https://api.elevenlabs.io/v1"
         self.model_id = "eleven_multilingual_v2"  # Best for non-English
+        print(f"[ELEVENLABS] Initialized with API key: {self.api_key[:10]}...{self.api_key[-4:]}")
         
     def _get_voice_id(self, language: str) -> str:
         """Get the voice ID for a language"""
