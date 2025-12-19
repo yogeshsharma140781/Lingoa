@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Screen = 'home' | 'topics' | 'conversation' | 'completion' | 'improvements'
+export type Screen = 'home' | 'mode' | 'topics' | 'roleplay' | 'custom-roleplay' | 'conversation' | 'completion' | 'improvements'
 
 // Topic definitions
 export interface Topic {
@@ -74,6 +74,12 @@ interface AppState {
   selectedTopic: string | null  // Topic ID
   lastTopic: string | null      // For avoiding repetition
   setSelectedTopic: (topicId: string | null) => void
+  
+  // Role-play
+  selectedRoleplayId: string | null  // Role-play scenario ID
+  customScenario: string | null      // Custom scenario description
+  setSelectedRoleplayId: (id: string | null) => void
+  setCustomScenario: (scenario: string | null) => void
 
   // Timer
   speakingTime: number // in milliseconds
@@ -160,6 +166,12 @@ export const useStore = create<AppState>((set) => ({
       lastTopic: topicId || state.lastTopic 
     }))
   },
+  
+  // Role-play
+  selectedRoleplayId: null,
+  customScenario: null,
+  setSelectedRoleplayId: (id) => set({ selectedRoleplayId: id }),
+  setCustomScenario: (scenario) => set({ customScenario: scenario }),
 
   // Timer
   speakingTime: 0,
@@ -220,6 +232,8 @@ export const useStore = create<AppState>((set) => ({
     improvements: [],
     currentCorrection: null,
     selectedTopic: null,
+    selectedRoleplayId: null,
+    customScenario: null,
   }),
 }))
 

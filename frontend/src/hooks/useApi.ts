@@ -110,6 +110,8 @@ export function useApi() {
     audioSpeed,
     setCurrentCorrection,
     selectedTopic,
+    selectedRoleplayId,
+    customScenario,
     setAudioSilentMode,
   } = useStore()
 
@@ -129,13 +131,18 @@ export function useApi() {
   // Start a new session
   const startSession = useCallback(async () => {
     try {
+      // Determine if this is role-play or topic mode
+      const isRoleplay = selectedRoleplayId !== null || customScenario !== null
+      
       const res = await fetch(`${API_BASE}/session/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
           target_language: targetLanguage,
-          topic: selectedTopic || 'random',
+          topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
+          roleplay_id: selectedRoleplayId || null,
+          custom_scenario: customScenario || null,
         }),
       })
 
@@ -149,7 +156,7 @@ export function useApi() {
       console.error('Failed to start session:', err)
     }
     return null
-  }, [userId, targetLanguage, selectedTopic, setSessionId, setAiMessage])
+  }, [userId, targetLanguage, selectedTopic, selectedRoleplayId, customScenario, setSessionId, setAiMessage])
 
   // End session and get feedback
   const endSession = useCallback(async (totalSpeakingTime: number) => {

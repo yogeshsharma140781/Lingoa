@@ -3,7 +3,10 @@ import { AnimatePresence } from 'framer-motion'
 import { useStore } from './store'
 import { useApi } from './hooks/useApi'
 import { HomeScreen } from './components/HomeScreen'
+import { ModeSelectionScreen } from './components/ModeSelectionScreen'
 import { TopicSelectionScreen } from './components/TopicSelectionScreen'
+import { RoleplaySelectionScreen } from './components/RoleplaySelectionScreen'
+import { CustomRoleplayScreen } from './components/CustomRoleplayScreen'
 import { ConversationScreen } from './components/ConversationScreen'
 import { CompletionScreen } from './components/CompletionScreen'
 import { ImprovementsScreen } from './components/ImprovementsScreen'
@@ -26,7 +29,10 @@ export default function App() {
       {/* Main content */}
       <AnimatePresence mode="wait">
         {currentScreen === 'home' && <HomeScreen key="home" />}
+        {currentScreen === 'mode' && <ModeSelectionScreen key="mode" />}
         {currentScreen === 'topics' && <TopicSelectionScreen key="topics" />}
+        {currentScreen === 'roleplay' && <RoleplaySelectionScreen key="roleplay" />}
+        {currentScreen === 'custom-roleplay' && <CustomRoleplayScreen key="custom-roleplay" />}
         {currentScreen === 'conversation' && <ConversationScreen key="conversation" />}
         {currentScreen === 'completion' && <CompletionScreen key="completion" />}
         {currentScreen === 'improvements' && <ImprovementsScreen key="improvements" />}

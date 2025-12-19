@@ -25,7 +25,7 @@ export function TopicSelectionScreen() {
   }
 
   const handleBack = () => {
-    setScreen('home')
+    setScreen('mode')
   }
 
   return (

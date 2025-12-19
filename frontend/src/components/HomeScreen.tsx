@@ -118,7 +118,7 @@ export function HomeScreen() {
         <button
           onClick={() => {
             unlockAudio() // Unlock audio on mobile before navigating
-            setScreen('topics')
+            setScreen('mode')
           }}
           className="w-full btn-primary rounded-2xl py-5 flex items-center justify-center gap-3 font-semibold text-lg text-white shadow-lg"
         >

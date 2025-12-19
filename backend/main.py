@@ -89,8 +89,229 @@ TOPIC_CONTEXT = {
     "random": "Let the conversation flow naturally to any topic.",
 }
 
-def get_conversation_prompt(language: str, topic: str = "random") -> str:
-    """Get the appropriate conversation prompt for a language and topic"""
+# Role-play scenarios - internal definitions (never shown to user)
+ROLEPLAY_SCENARIOS = {
+    # Daily Life
+    "cafe_order": {
+        "name": "Ordering coffee at a café",
+        "ai_role": "café barista/server",
+        "setting": "busy café",
+        "tone": "friendly, efficient",
+        "goal": "take order naturally"
+    },
+    "restaurant": {
+        "name": "Eating at a restaurant",
+        "ai_role": "restaurant server",
+        "setting": "restaurant",
+        "tone": "professional, helpful",
+        "goal": "serve the customer"
+    },
+    "groceries": {
+        "name": "Buying groceries",
+        "ai_role": "store cashier or helpful shopper",
+        "setting": "grocery store",
+        "tone": "casual, friendly",
+        "goal": "natural shopping interaction"
+    },
+    "neighbor": {
+        "name": "Talking to a neighbor",
+        "ai_role": "neighbor",
+        "setting": "apartment building or street",
+        "tone": "warm, casual",
+        "goal": "friendly neighborly chat"
+    },
+    "directions": {
+        "name": "Asking for directions",
+        "ai_role": "local person",
+        "setting": "street or public place",
+        "tone": "helpful, patient",
+        "goal": "give clear directions"
+    },
+    # Work & Admin
+    "colleague": {
+        "name": "Talking to a colleague",
+        "ai_role": "work colleague",
+        "setting": "office or workplace",
+        "tone": "professional but friendly",
+        "goal": "casual work conversation"
+    },
+    "manager": {
+        "name": "One-on-one with a manager",
+        "ai_role": "manager/supervisor",
+        "setting": "office meeting",
+        "tone": "supportive, professional",
+        "goal": "discuss work matters"
+    },
+    "meeting_smalltalk": {
+        "name": "Small talk before a meeting",
+        "ai_role": "colleague or meeting participant",
+        "setting": "meeting room or office",
+        "tone": "casual, professional",
+        "goal": "light conversation before meeting"
+    },
+    "job_interview": {
+        "name": "Casual job interview",
+        "ai_role": "interviewer",
+        "setting": "interview room",
+        "tone": "professional, encouraging",
+        "goal": "conduct interview naturally"
+    },
+    "hr_admin": {
+        "name": "Talking to HR / admin",
+        "ai_role": "HR or admin staff",
+        "setting": "office",
+        "tone": "helpful, professional",
+        "goal": "handle admin matters"
+    },
+    # Services & Errands
+    "taxi": {
+        "name": "Taxi / ride-share conversation",
+        "ai_role": "taxi/ride-share driver",
+        "setting": "vehicle",
+        "tone": "friendly, conversational",
+        "goal": "drive and chat naturally"
+    },
+    "customer_support": {
+        "name": "Calling customer support",
+        "ai_role": "customer support agent",
+        "setting": "phone call",
+        "tone": "helpful, patient",
+        "goal": "resolve issue"
+    },
+    "pharmacy": {
+        "name": "At the pharmacy",
+        "ai_role": "pharmacist or pharmacy staff",
+        "setting": "pharmacy",
+        "tone": "professional, caring",
+        "goal": "help with medication/pharmacy needs"
+    },
+    "bank": {
+        "name": "At the bank",
+        "ai_role": "bank teller or banker",
+        "setting": "bank",
+        "tone": "professional, helpful",
+        "goal": "handle banking matters"
+    },
+    "post_office": {
+        "name": "At the post office",
+        "ai_role": "post office clerk",
+        "setting": "post office",
+        "tone": "efficient, friendly",
+        "goal": "handle postal services"
+    },
+    # Social & Travel
+    "meeting_new": {
+        "name": "Meeting someone new",
+        "ai_role": "new acquaintance",
+        "setting": "social gathering or event",
+        "tone": "friendly, curious",
+        "goal": "get to know each other"
+    },
+    "friends_home": {
+        "name": "Invited to a friend's home",
+        "ai_role": "host friend",
+        "setting": "friend's home",
+        "tone": "warm, welcoming",
+        "goal": "host and chat naturally"
+    },
+    "hotel_checkin": {
+        "name": "Hotel check-in",
+        "ai_role": "hotel receptionist",
+        "setting": "hotel lobby",
+        "tone": "professional, welcoming",
+        "goal": "check in guest"
+    },
+    "travel_help": {
+        "name": "Asking for help while traveling",
+        "ai_role": "local person or tourist helper",
+        "setting": "tourist area or public place",
+        "tone": "helpful, friendly",
+        "goal": "help traveler"
+    },
+    "phone_call": {
+        "name": "Casual phone call",
+        "ai_role": "friend or acquaintance",
+        "setting": "phone call",
+        "tone": "casual, friendly",
+        "goal": "natural phone conversation"
+    },
+}
+
+def get_roleplay_prompt(language: str, scenario_id: str, custom_scenario: str = None) -> str:
+    """Get role-play prompt - AI speaks immediately in character"""
+    if custom_scenario:
+        # Custom scenario - infer role, setting, tone from user input
+        if language == "hi":
+            return f"""तुम एक real person हो जो इस situation में है: "{custom_scenario}"
+
+CRITICAL RULES:
+- तुरंत character में बोलो, बिना explanation के
+- Situation को repeat मत करो
+- Meta questions मत पूछो
+- जैसे user ने तुम्हें real life में approach किया हो, वैसे बोलो
+- Natural, casual Hindustani बोलो
+- Short sentences (max 8-10 words)
+- एक friendly person की तरह behave करो, teacher नहीं
+
+START IMMEDIATELY IN CHARACTER - no setup, no explanation."""
+        else:
+            return f"""You are role-playing a real person in this situation: "{custom_scenario}"
+
+CRITICAL RULES:
+- Act naturally and immediately
+- Do NOT explain the scenario
+- Do NOT ask meta questions
+- Speak as if the user has just approached you in real life
+- Use casual, spoken language
+- Short sentences (max 10-12 words)
+- Behave like a real person, not a teacher
+
+START IMMEDIATELY IN CHARACTER - no setup, no explanation."""
+    
+    # Built-in scenario
+    scenario = ROLEPLAY_SCENARIOS.get(scenario_id)
+    if not scenario:
+        scenario = ROLEPLAY_SCENARIOS["cafe_order"]  # Fallback
+    
+    ai_role = scenario["ai_role"]
+    setting = scenario["setting"]
+    tone = scenario["tone"]
+    
+    if language == "hi":
+        return f"""तुम एक {ai_role} हो, {setting} में।
+
+CRITICAL RULES:
+- तुरंत character में बोलो
+- "Let's role-play" या explanation मत दो
+- जैसे user तुम्हारे पास आया हो, वैसे respond करो
+- {tone} tone में बोलो
+- Natural, casual Hindustani
+- Short sentences (max 8-10 words)
+- Real person की तरह behave करो
+
+START IMMEDIATELY - no setup."""
+    else:
+        return f"""You are a {ai_role} in a {setting}.
+
+CRITICAL RULES:
+- Speak immediately in character
+- Do NOT say "Let's role-play" or explain roles
+- React as if the user just approached you
+- Use a {tone} tone
+- Use casual, spoken language
+- Short sentences (max 10-12 words)
+- Behave like a real person
+
+START IMMEDIATELY - no setup."""
+
+def get_conversation_prompt(language: str, topic: str = "random", roleplay_id: str = None, custom_scenario: str = None) -> str:
+    """Get the appropriate conversation prompt - handles both topics and role-play"""
+    
+    # Role-play mode
+    if roleplay_id or custom_scenario:
+        return get_roleplay_prompt(language, roleplay_id or "", custom_scenario)
+    
+    # Regular topic mode
     topic_hint = TOPIC_CONTEXT.get(topic, TOPIC_CONTEXT["random"])
     
     # Use Hindi-specific prompt for Hindi
@@ -257,7 +478,9 @@ if IS_PRODUCTION:
 class SessionStart(BaseModel):
     user_id: str
     target_language: str = "es"  # Default to Spanish
-    topic: str = "random"        # Conversation topic
+    topic: str = "random"        # Conversation topic (or "roleplay" for role-play mode)
+    roleplay_id: str = None      # Role-play scenario ID (if topic is "roleplay")
+    custom_scenario: str = None  # Custom role-play scenario description
 
 class SessionEnd(BaseModel):
     session_id: str
@@ -290,14 +513,23 @@ async def start_session(data: SessionStart):
     """Start a new speaking session"""
     session_id = str(uuid.uuid4())
     
-    # Get topic-aware opening greeting
-    greeting = await generate_greeting(data.target_language, data.topic)
+    # Generate greeting - role-play or topic-based
+    if data.topic == "roleplay":
+        greeting = await generate_roleplay_greeting(
+            data.target_language, 
+            data.roleplay_id, 
+            data.custom_scenario
+        )
+    else:
+        greeting = await generate_greeting(data.target_language, data.topic)
     
     sessions[session_id] = {
         "id": session_id,
         "user_id": data.user_id,
         "target_language": data.target_language,
-        "topic": data.topic,  # Store topic for conversation context
+        "topic": data.topic,
+        "roleplay_id": data.roleplay_id,
+        "custom_scenario": data.custom_scenario,
         "started_at": datetime.now().isoformat(),
         "messages": [
             {"role": "assistant", "content": greeting}
@@ -416,10 +648,15 @@ async def respond_to_user(data: UserMessage):
                 messages=[
                     {
                         "role": "system",
-                        "content": get_conversation_prompt(session["target_language"], session.get("topic", "random"))
+                        "content": get_conversation_prompt(
+                            session["target_language"], 
+                            session.get("topic", "random"),
+                            session.get("roleplay_id"),
+                            session.get("custom_scenario")
+                        )
                     },
                     *session["messages"][-10:]  # Last 10 messages for context
-                ],
+                    ],
                 stream=True,
                 max_tokens=150,
                 temperature=0.9
@@ -985,7 +1222,12 @@ async def websocket_conversation(websocket: WebSocket, session_id: str):
                         messages=[
                             {
                                 "role": "system",
-                                "content": get_conversation_prompt(session["target_language"], session.get("topic", "random"))
+                                "content": get_conversation_prompt(
+                                    session["target_language"], 
+                                    session.get("topic", "random"),
+                                    session.get("roleplay_id"),
+                                    session.get("custom_scenario")
+                                )
                             },
                             *session["messages"][-10:]
                         ],
@@ -1116,6 +1358,89 @@ TOPIC_GREETINGS = {
     },
 }
 
+async def generate_roleplay_greeting(language: str, scenario_id: str = None, custom_scenario: str = None) -> str:
+    """Generate role-play opening - AI speaks immediately in character"""
+    if custom_scenario:
+        # Use LLM to generate immediate in-character opening for custom scenario
+        try:
+            prompt = get_roleplay_prompt(language, "", custom_scenario)
+            response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": "Start the conversation immediately."}
+                ],
+                max_tokens=30,
+                temperature=0.8
+            )
+            greeting = response.choices[0].message.content.strip()
+            # Remove any quotes if LLM added them
+            greeting = greeting.strip('"').strip("'")
+            return greeting
+        except Exception as e:
+            print(f"[ROLEPLAY] Error generating custom greeting: {e}")
+            # Fallback to generic
+            if language == "hi":
+                return "नमस्ते! कैसे मदद कर सकता हूँ?"
+            return "Hello! How can I help you?"
+    
+    # Built-in scenario greetings (in-character, immediate)
+    scenario = ROLEPLAY_SCENARIOS.get(scenario_id, ROLEPLAY_SCENARIOS["cafe_order"])
+    
+    # Language-specific in-character greetings
+    roleplay_greetings = {
+        "hi": {
+            "cafe_order": ["नमस्ते! क्या लोगे?", "हाय! क्या चाहिए?", "क्या order करेंगे?"],
+            "restaurant": ["नमस्ते! कितने लोग हैं?", "हाय! टेबल चाहिए?", "क्या order करेंगे?"],
+            "groceries": ["नमस्ते! क्या चाहिए?", "हाय! कुछ खास?", "कैसे मदद करूँ?"],
+            "neighbor": ["अरे! कैसे हो?", "हाय! क्या हाल है?", "कैसे चल रहा है?"],
+            "directions": ["हाँ जी, बताइए?", "कहाँ जाना है?", "कैसे मदद करूँ?"],
+            "colleague": ["हाय! कैसे हो?", "क्या चल रहा है?", "कैसा रहा दिन?"],
+            "manager": ["नमस्ते। बैठिए।", "हाय! कैसे हो?", "क्या बात है?"],
+            "meeting_smalltalk": ["हाय! कैसे हो?", "कैसा रहा?", "कुछ नया?"],
+            "job_interview": ["नमस्ते! बैठिए।", "हाय! कैसे हो?", "चलिए शुरू करते हैं।"],
+            "hr_admin": ["नमस्ते। बताइए?", "हाय! कैसे मदद करूँ?", "क्या चाहिए?"],
+            "taxi": ["हाँ जी, कहाँ जाना है?", "कहाँ जाना है?", "चलिए, कहाँ?"],
+            "customer_support": ["नमस्ते! कैसे मदद कर सकता हूँ?", "हाय! क्या problem है?", "बताइए, क्या हुआ?"],
+            "pharmacy": ["नमस्ते! क्या चाहिए?", "हाय! कैसे मदद करूँ?", "क्या prescription है?"],
+            "bank": ["नमस्ते! कैसे मदद कर सकता हूँ?", "हाय! क्या चाहिए?", "बताइए?"],
+            "post_office": ["नमस्ते! क्या चाहिए?", "हाय! कैसे मदद करूँ?", "क्या send करना है?"],
+            "meeting_new": ["हाय! मैं [name] हूँ।", "नमस्ते! कैसे हो?", "हाय! कैसे मिले?"],
+            "friends_home": ["अरे! आ जाओ!", "हाय! कैसे हो?", "अंदर आ जाओ!"],
+            "hotel_checkin": ["नमस्ते! check-in है?", "हाय! reservation है?", "कैसे मदद कर सकता हूँ?"],
+            "travel_help": ["हाँ जी, बताइए?", "कैसे मदद करूँ?", "क्या problem है?"],
+            "phone_call": ["हाय! कैसे हो?", "अरे! क्या हाल है?", "कैसे चल रहा है?"],
+        },
+        "en": {
+            "cafe_order": ["Hi! What can I get you?", "Hey! What would you like?", "What can I get started for you?"],
+            "restaurant": ["Hi! How many?", "Welcome! Table for how many?", "What can I get you?"],
+            "groceries": ["Hi! What can I help you find?", "Hey! Need anything?", "What are you looking for?"],
+            "neighbor": ["Hey! How's it going?", "Hi! What's up?", "How are you doing?"],
+            "directions": ["Yes? Where are you headed?", "Where do you need to go?", "How can I help?"],
+            "colleague": ["Hey! How's it going?", "Hi! What's up?", "How was your day?"],
+            "manager": ["Hi! Have a seat.", "Hey! How are things?", "What's on your mind?"],
+            "meeting_smalltalk": ["Hey! How's it going?", "Hi! How are you?", "What's new?"],
+            "job_interview": ["Hi! Please have a seat.", "Hello! How are you?", "Let's get started."],
+            "hr_admin": ["Hi! How can I help?", "Hello! What do you need?", "What can I do for you?"],
+            "taxi": ["Where to?", "Where are you headed?", "Where do you need to go?"],
+            "customer_support": ["Hi! How can I help you?", "Hello! What's the issue?", "How can I assist?"],
+            "pharmacy": ["Hi! What can I help you with?", "Hello! Do you have a prescription?", "What do you need?"],
+            "bank": ["Hi! How can I help you?", "Hello! What can I do for you?", "What do you need?"],
+            "post_office": ["Hi! What can I help you with?", "Hello! What do you need to send?", "How can I help?"],
+            "meeting_new": ["Hi! I'm [name].", "Hey! Nice to meet you!", "Hi! How are you?"],
+            "friends_home": ["Hey! Come in!", "Hi! How are you?", "Welcome! Come on in!"],
+            "hotel_checkin": ["Hi! Checking in?", "Hello! Do you have a reservation?", "Welcome! How can I help?"],
+            "travel_help": ["Yes? How can I help?", "What do you need?", "What's the problem?"],
+            "phone_call": ["Hey! How's it going?", "Hi! What's up?", "How are you doing?"],
+        }
+    }
+    
+    # Get greetings for this scenario and language
+    lang_greetings = roleplay_greetings.get(language, roleplay_greetings["en"])
+    scenario_greetings = lang_greetings.get(scenario_id, lang_greetings.get("cafe_order", ["Hello!"]))
+    
+    return random.choice(scenario_greetings)
+
 async def generate_greeting(language: str, topic: str = "random") -> str:
     """Generate a topic-aware opening greeting in the target language"""
     # Get greetings for this language, fallback to English
@@ -1157,6 +1482,33 @@ async def generate_feedback(session: dict) -> dict:
         return {"improvements": []}
 
 # ============ Health Check ============
+
+@app.get("/api/roleplay/scenarios")
+async def get_roleplay_scenarios():
+    """Get list of available role-play scenarios grouped by category"""
+    categories = {
+        "Daily Life": ["cafe_order", "restaurant", "groceries", "neighbor", "directions"],
+        "Work & Admin": ["colleague", "manager", "meeting_smalltalk", "job_interview", "hr_admin"],
+        "Services & Errands": ["taxi", "customer_support", "pharmacy", "bank", "post_office"],
+        "Social & Travel": ["meeting_new", "friends_home", "hotel_checkin", "travel_help", "phone_call"],
+    }
+    
+    scenarios_by_category = []
+    for category_name, scenario_ids in categories.items():
+        category_scenarios = []
+        for scenario_id in scenario_ids:
+            if scenario_id in ROLEPLAY_SCENARIOS:
+                category_scenarios.append({
+                    "id": scenario_id,
+                    "name": ROLEPLAY_SCENARIOS[scenario_id]["name"]
+                })
+        if category_scenarios:
+            scenarios_by_category.append({
+                "category": category_name,
+                "scenarios": category_scenarios
+            })
+    
+    return {"categories": scenarios_by_category}
 
 @app.get("/health")
 async def health_check():
