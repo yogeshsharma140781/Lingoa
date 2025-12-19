@@ -231,7 +231,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         voice_id = self._get_voice_id(language)
         voice_settings = self._get_voice_settings(language)
         
-            async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/text-to-speech/{voice_id}",
                 headers={
