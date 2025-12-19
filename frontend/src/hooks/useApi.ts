@@ -9,27 +9,40 @@ let audioUrls: string[] = [] // Track URLs for cleanup
 let recentFillers: string[] = [] // Track recent fillers to avoid repetition
 
 // Map UI speed to actual TTS speed
-// Speed is applied server-side (OpenAI) or handled by ElevenLabs
-// OpenAI fallback speed map (server-side)
+// Speed is applied server-side (OpenAI) or client-side playbackRate (ElevenLabs)
+// OpenAI fallback speed map (server-side) - reduced by 10%
 const OPENAI_SPEED_MAP: Record<number, number> = {
-  0.8: 0.55,  // Slow
-  0.9: 0.66,  // Natural  
-  1.0: 0.72,  // Normal
+  0.8: 0.495,  // Slow (0.55 * 0.9)
+  0.9: 0.594,  // Natural (0.66 * 0.9)
+  1.0: 0.648,  // Normal (0.72 * 0.9) - 10% slower
 }
 
-// Hindi uses moderate TTS speed with natural pauses
+// Hindi uses moderate TTS speed with natural pauses - reduced by 10%
 const HINDI_SPEED_MAP: Record<number, number> = {
-  0.8: 0.70,  // Slow
-  0.9: 0.80,  // Natural
-  1.0: 0.85,  // Normal - still natural with pauses
+  0.8: 0.63,   // Slow (0.70 * 0.9)
+  0.9: 0.72,   // Natural (0.80 * 0.9)
+  1.0: 0.765,  // Normal (0.85 * 0.9) - 10% slower
+}
+
+// Client-side playback speed for ElevenLabs (via playbackRate)
+// ElevenLabs generates at normal speed, we slow it down client-side
+const ELEVENLABS_PLAYBACK_RATE: Record<number, number> = {
+  0.8: 0.72,   // Slow (0.8 * 0.9)
+  0.9: 0.81,   // Natural (0.9 * 0.9)
+  1.0: 0.90,   // Normal (1.0 * 0.9) - 10% slower
 }
 
 function getActualSpeed(uiSpeed: number, language: string): number {
-  // For OpenAI fallback
+  // For OpenAI fallback (server-side speed)
   if (language === 'hi') {
-    return HINDI_SPEED_MAP[uiSpeed] || 0.85
+    return HINDI_SPEED_MAP[uiSpeed] || 0.765
   }
-  return OPENAI_SPEED_MAP[uiSpeed] || 0.72
+  return OPENAI_SPEED_MAP[uiSpeed] || 0.648
+}
+
+function getPlaybackRate(uiSpeed: number): number {
+  // For ElevenLabs (client-side playbackRate)
+  return ELEVENLABS_PLAYBACK_RATE[uiSpeed] || 0.90
 }
 
 // Web Audio API context for mobile - more reliable than HTMLAudioElement
@@ -294,6 +307,9 @@ export function useApi() {
       const audioBlob = new Blob([audioArray], { type: 'audio/mp3' })
       const audioUrl = URL.createObjectURL(audioBlob)
 
+      // Apply playback speed (10% slower for more natural pace)
+      const playbackRate = getPlaybackRate(audioSpeed)
+      
       // Try Web Audio API first (more reliable on mobile), fallback to HTMLAudioElement
       try {
         const ctx = getAudioContext()
@@ -302,6 +318,7 @@ export function useApi() {
         
         const source = ctx.createBufferSource()
         source.buffer = audioBuffer
+        source.playbackRate.value = playbackRate  // Apply speed control
         source.connect(ctx.destination)
         
         await new Promise<void>((resolve) => {
@@ -311,15 +328,16 @@ export function useApi() {
             resolve()
           }
           source.start(0)
-          console.log('[TTS] Playing via Web Audio API')
+          console.log(`[TTS] Playing via Web Audio API at ${playbackRate}x speed`)
         })
       } catch (webAudioError) {
         console.log('[TTS] Web Audio failed, trying HTMLAudioElement:', webAudioError)
         
-        // Fallback to HTMLAudioElement
+        // Fallback to HTMLAudioElement with playbackRate
         await new Promise<void>((resolve) => {
           const audio = new Audio(audioUrl)
           currentAudio = audio
+          audio.playbackRate = playbackRate  // Apply speed control
           audio.setAttribute('playsinline', 'true')
           audio.preload = 'auto'
 
