@@ -663,45 +663,55 @@ async def text_to_speech(data: TextToSpeechRequest):
     print(f"[TTS] Generating audio for: {data.text[:80]}...")
     print(f"[TTS] Language: {data.language}, Speed: {data.speed}")
     
+    # Always try ElevenLabs first if configured, then fallback to OpenAI
+    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+    
+    if elevenlabs_key and len(elevenlabs_key) > 10:
+        try:
+            print("[TTS] Attempting ElevenLabs...")
+            tts = get_tts_provider(client)
+            
+            # Only try ElevenLabs if it's actually the provider
+            if isinstance(tts, ElevenLabsTTSProvider):
+                audio_content = await tts.generate_speech(
+                    text=data.text,
+                    language=data.language,
+                    speed=data.speed
+                )
+                
+                audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+                print(f"[TTS] ✅ ElevenLabs generated {len(audio_content)} bytes")
+                return {"audio": audio_base64, "format": "mp3"}
+            else:
+                print("[TTS] Provider is not ElevenLabs, using OpenAI")
+        except Exception as e:
+            print(f"[TTS ERROR] ElevenLabs failed: {e}")
+            print("[TTS] Falling back to OpenAI...")
+    
+    # OpenAI fallback (always available)
     try:
-        # Get the TTS provider (ElevenLabs if API key available, else OpenAI)
-        tts = get_tts_provider(client)
+        print("[TTS] Using OpenAI TTS...")
+        text_to_speak = data.text
+        if data.language == "hi":
+            text_to_speak = add_pauses_for_hindi(data.text)
         
-        # Generate speech (provider handles pre-processing)
-        audio_content = await tts.generate_speech(
-            text=data.text,
-            language=data.language,
-            speed=data.speed
+        voice = VOICE_MAP.get(data.language, "nova")
+        response = await client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text_to_speak,
+            speed=data.speed,
+            response_format="mp3"
         )
         
-        audio_base64 = base64.b64encode(audio_content).decode('utf-8')
-        
-        print(f"[TTS] Generated {len(audio_content)} bytes of audio")
+        audio_base64 = base64.b64encode(response.content).decode('utf-8')
+        print(f"[TTS] ✅ OpenAI generated {len(response.content)} bytes")
         return {"audio": audio_base64, "format": "mp3"}
-        
-    except Exception as e:
-        print(f"[TTS ERROR] {e}")
-        # Try OpenAI fallback if ElevenLabs fails
-        try:
-            print("[TTS] Trying OpenAI fallback...")
-            text_to_speak = data.text
-            if data.language == "hi":
-                text_to_speak = add_pauses_for_hindi(data.text)
-            
-            voice = VOICE_MAP.get(data.language, "nova")
-            response = await client.audio.speech.create(
-                model="tts-1",
-                voice=voice,
-                input=text_to_speak,
-                speed=data.speed,
-                response_format="mp3"
-            )
-            
-            audio_base64 = base64.b64encode(response.content).decode('utf-8')
-            return {"audio": audio_base64, "format": "mp3"}
-        except Exception as fallback_error:
-            print(f"[TTS FALLBACK ERROR] {fallback_error}")
-            raise HTTPException(status_code=500, detail=str(e))
+    except Exception as fallback_error:
+        print(f"[TTS FALLBACK ERROR] {fallback_error}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"TTS failed: {str(fallback_error)}")
 
 @app.post("/api/tts/elevenlabs/stream")
 async def elevenlabs_stream_tts(data: TextToSpeechRequest):

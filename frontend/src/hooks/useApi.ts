@@ -9,17 +9,7 @@ let audioUrls: string[] = [] // Track URLs for cleanup
 let recentFillers: string[] = [] // Track recent fillers to avoid repetition
 
 // Map UI speed to actual TTS speed
-// For ElevenLabs: speed applied client-side via playbackRate (1.0 = normal)
-// For OpenAI fallback: speed applied server-side (0.7 = slower, more natural)
-
-// Client-side playback speed for ElevenLabs (via playbackRate)
-// Default 0.9x for more natural pace, beginner-friendly
-const ELEVENLABS_SPEED_MAP: Record<number, number> = {
-  0.8: 0.8,   // Slow - good for beginners
-  0.9: 0.9,   // Natural pace (default)
-  1.0: 1.0,   // Normal speed
-}
-
+// Speed is applied server-side (OpenAI) or handled by ElevenLabs
 // OpenAI fallback speed map (server-side)
 const OPENAI_SPEED_MAP: Record<number, number> = {
   0.8: 0.55,  // Slow
@@ -40,11 +30,6 @@ function getActualSpeed(uiSpeed: number, language: string): number {
     return HINDI_SPEED_MAP[uiSpeed] || 0.85
   }
   return OPENAI_SPEED_MAP[uiSpeed] || 0.72
-}
-
-function getPlaybackSpeed(uiSpeed: number): number {
-  // For ElevenLabs client-side playback
-  return ELEVENLABS_SPEED_MAP[uiSpeed] || 0.9
 }
 
 // Web Audio API context for mobile - more reliable than HTMLAudioElement
@@ -259,7 +244,7 @@ export function useApi() {
     return null
   }, [sessionId, appendAiMessage])
 
-  // Text to speech - uses streaming for fast start, falls back to regular TTS
+  // Text to speech - uses regular TTS endpoint (handles ElevenLabs/OpenAI fallback server-side)
   const textToSpeech = useCallback(async (text: string): Promise<void> => {
     // Stop any currently playing audio
     stopAllAudio()
@@ -269,137 +254,15 @@ export function useApi() {
     console.log(`[TTS] Speaking: ${text.slice(0, 80)}...`)
 
     try {
-      // Try streaming TTS first for faster audio start (ElevenLabs)
-      // Use client-side playback speed for natural control
-      const playbackSpeed = getPlaybackSpeed(audioSpeed)
-      const success = await playStreamingTTS(text, targetLanguage, playbackSpeed, setIsAiSpeaking)
-      
-      if (!success) {
-        // Fall back to regular TTS (OpenAI)
-        console.log('[TTS] Streaming failed, trying regular TTS...')
-        const actualSpeed = getActualSpeed(audioSpeed, targetLanguage)
-        await playRegularTTS(text, targetLanguage, actualSpeed, setIsAiSpeaking)
-      }
+      // Use regular TTS endpoint - it handles ElevenLabs with OpenAI fallback automatically
+      // This is more reliable than trying streaming first
+      const actualSpeed = getActualSpeed(audioSpeed, targetLanguage)
+      await playRegularTTS(text, targetLanguage, actualSpeed, setIsAiSpeaking)
     } catch (err) {
-      console.error('TTS error:', err)
+      console.error('[TTS] Error:', err)
       setIsAiSpeaking(false)
     }
   }, [targetLanguage, audioSpeed, setIsAiSpeaking])
-
-  // Streaming TTS - starts playing audio as soon as first chunk arrives
-  const playStreamingTTS = async (
-    text: string,
-    language: string,
-    speed: number,
-    setIsAiSpeaking: (speaking: boolean) => void
-  ): Promise<boolean> => {
-    try {
-      console.log('[TTS STREAM] Starting streaming TTS...')
-      
-      const response = await fetch(`${API_BASE}/tts/elevenlabs/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, language, speed }),
-      })
-
-      if (!response.ok) {
-        console.error('[TTS STREAM] Failed:', response.status)
-        return false
-      }
-
-      // Collect all chunks into a single blob
-      const chunks: Uint8Array[] = []
-      const reader = response.body?.getReader()
-      
-      if (!reader) {
-        return false
-      }
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value) {
-          chunks.push(value)
-        }
-      }
-
-      // Combine chunks
-      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0)
-      const audioData = new Uint8Array(totalLength)
-      let offset = 0
-      for (const chunk of chunks) {
-        audioData.set(chunk, offset)
-        offset += chunk.length
-      }
-
-      console.log(`[TTS STREAM] Received ${totalLength} bytes`)
-
-      // Create blob and play
-      const audioBlob = new Blob([audioData], { type: 'audio/mpeg' })
-      const audioUrl = URL.createObjectURL(audioBlob)
-
-      // Play using Web Audio API for better mobile support
-      try {
-        const ctx = getAudioContext()
-        const arrayBuffer = await audioBlob.arrayBuffer()
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-        
-        // Apply playback speed via playbackRate
-        const source = ctx.createBufferSource()
-        source.buffer = audioBuffer
-        source.playbackRate.value = speed  // Client-side speed control
-        source.connect(ctx.destination)
-        
-        await new Promise<void>((resolve) => {
-          source.onended = () => {
-            setIsAiSpeaking(false)
-            URL.revokeObjectURL(audioUrl)
-            resolve()
-          }
-          source.start(0)
-          console.log(`[TTS STREAM] Playing at ${speed}x speed`)
-        })
-        
-        return true
-      } catch (webAudioError) {
-        console.log('[TTS STREAM] Web Audio failed, using HTMLAudioElement')
-        
-        // Fallback to HTMLAudioElement with playbackRate
-        await new Promise<void>((resolve) => {
-          const audio = new Audio(audioUrl)
-          currentAudio = audio
-          audio.playbackRate = speed  // Client-side speed control
-          audio.setAttribute('playsinline', 'true')
-          audio.preload = 'auto'
-
-          audio.onended = () => {
-            setIsAiSpeaking(false)
-            URL.revokeObjectURL(audioUrl)
-            currentAudio = null
-            resolve()
-          }
-
-          audio.onerror = () => {
-            setIsAiSpeaking(false)
-            URL.revokeObjectURL(audioUrl)
-            currentAudio = null
-            resolve()
-          }
-
-          audio.play().catch(() => {
-            setIsAiSpeaking(false)
-            currentAudio = null
-            resolve()
-          })
-        })
-        
-        return true
-      }
-    } catch (err) {
-      console.error('[TTS STREAM] Error:', err)
-      return false
-    }
-  }
 
   // Regular TTS - sends full text and plays audio
   const playRegularTTS = async (

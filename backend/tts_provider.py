@@ -39,20 +39,22 @@ LANGUAGE_VOICE_SETTINGS: Dict[str, ElevenLabsVoiceSettings] = {
 }
 
 # ElevenLabs Multilingual Voice IDs
-# Using voices that support multiple languages and sound conversational
+# Using known multilingual voices that support multiple languages
+# These are default ElevenLabs voices that work across languages
 ELEVENLABS_VOICE_MAP = {
-    # Multilingual voices that sound warm and conversational
-    "hi": "pFZP5JQG7iQjIQuC4Bku",  # Lily - warm, multilingual
-    "es": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "fr": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "de": "pFZP5JQG7iQjIQuC4Bku",  # Lily  
-    "nl": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "it": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "pt": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "zh": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "ja": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "ko": "pFZP5JQG7iQjIQuC4Bku",  # Lily
-    "en": "pFZP5JQG7iQjIQuC4Bku",  # Lily
+    # Using Rachel (21m00Tcm4TlvDq8ikWAM) - warm, multilingual, conversational
+    # Alternative: Bella (EXAVITQu4vr4xnSDxMaL) or Domi (AZnzlk1XvdvUeBnXmlld)
+    "hi": "21m00Tcm4TlvDq8ikWAM",  # Rachel - multilingual
+    "es": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "fr": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "de": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "nl": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "it": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "pt": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "zh": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "ja": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "ko": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "en": "21m00Tcm4TlvDq8ikWAM",  # Rachel
 }
 
 # Alternative voices to try if default doesn't sound good
@@ -226,7 +228,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         voice_id = self._get_voice_id(language)
         voice_settings = self._get_voice_settings(language)
         
-        async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/text-to-speech/{voice_id}",
                 headers={
@@ -243,8 +245,14 @@ class ElevenLabsTTSProvider(TTSProvider):
             )
             
             if response.status_code != 200:
-                raise Exception(f"ElevenLabs API error: {response.status_code} - {response.text}")
+                error_text = response.text[:500] if hasattr(response, 'text') else str(response.content[:500])
+                print(f"[ELEVENLABS ERROR] Status {response.status_code}: {error_text}")
+                raise Exception(f"ElevenLabs API error: {response.status_code} - {error_text}")
             
+            if not response.content or len(response.content) == 0:
+                raise Exception("ElevenLabs returned empty audio")
+            
+            print(f"[ELEVENLABS] Generated {len(response.content)} bytes of audio")
             return response.content
     
     async def stream_speech(
