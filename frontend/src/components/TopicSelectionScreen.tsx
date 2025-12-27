@@ -11,13 +11,15 @@ export function TopicSelectionScreen() {
   } = useStore()
 
   const handleTopicSelect = (topicId: string) => {
-    unlockAudio() // Unlock audio on mobile before conversation
+    // Unlock audio in background (non-blocking) - will be ready by conversation time
+    unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
     setSelectedTopic(topicId)
     setScreen('conversation')
   }
 
   const handleSkip = () => {
-    unlockAudio() // Unlock audio on mobile before conversation
+    // Unlock audio in background (non-blocking) - will be ready by conversation time
+    unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
     // Random topic if skipped
     const randomTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)]
     setSelectedTopic(randomTopic.id)

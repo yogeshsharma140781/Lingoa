@@ -71,11 +71,16 @@ VOICE_MAP = {
     "it": "nova",
     "pt": "nova",
     "hi": "nova",     # Back to nova for Hindi
-    "en": "echo",     # Warm, conversational
+    "en": "nova",     # Keep gender consistent with Lingoa's (female) persona
     "zh": "nova",
     "ja": "nova",
     "ko": "nova",
 }
+
+# AI persona configuration
+# Important: keep assistant self-references consistent with the chosen TTS voice persona.
+# We standardize on a female persona to match the default voice (ElevenLabs Rachel / OpenAI nova).
+AI_PERSONA_GENDER = "female"
 
 # Topic descriptions for AI context (not announced to user)
 TOPIC_CONTEXT = {
@@ -252,9 +257,14 @@ CRITICAL RULES:
 - Natural, casual Hindustani बोलो
 - Short sentences (max 8-10 words)
 - एक friendly person की तरह behave करो, teacher नहीं
+- तुम एक महिला हो: अपने बारे में हमेशा स्त्रीलिंग में बोलो (गई/थी/करती हूँ), कभी पुल्लिंग नहीं (गया/था/करता हूँ)
+- LANGUAGE REQUIREMENT - CRITICAL:
+  - सिर्फ हिंदी में बोलो (देवनागरी)
+  - English कभी मत बोलो
 
 START IMMEDIATELY IN CHARACTER - no setup, no explanation."""
         else:
+            target_language_name = LANGUAGE_NAMES.get(language, "the target language")
             return f"""You are role-playing a real person in this situation: "{custom_scenario}"
 
 CRITICAL RULES:
@@ -265,6 +275,10 @@ CRITICAL RULES:
 - Use casual, spoken language
 - Short sentences (max 10-12 words)
 - Behave like a real person, not a teacher
+- Persona: you are a woman. Never refer to yourself as male.
+- LANGUAGE REQUIREMENT - CRITICAL:
+  - Speak ONLY in {target_language_name} ({language})
+  - NEVER switch languages, even if user mixes languages
 
 START IMMEDIATELY IN CHARACTER - no setup, no explanation."""
     
@@ -288,9 +302,14 @@ CRITICAL RULES:
 - Natural, casual Hindustani
 - Short sentences (max 8-10 words)
 - Real person की तरह behave करो
+- तुम एक महिला हो: अपने बारे में हमेशा स्त्रीलिंग में बोलो (गई/थी/करती हूँ), कभी पुल्लिंग नहीं (गया/था/करता हूँ)
+- LANGUAGE REQUIREMENT - CRITICAL:
+  - सिर्फ हिंदी में बोलो (देवनागरी)
+  - English कभी मत बोलो
 
 START IMMEDIATELY - no setup."""
     else:
+        target_language_name = LANGUAGE_NAMES.get(language, "the target language")
         return f"""You are a {ai_role} in a {setting}.
 
 CRITICAL RULES:
@@ -301,6 +320,10 @@ CRITICAL RULES:
 - Use casual, spoken language
 - Short sentences (max 10-12 words)
 - Behave like a real person
+- Persona: you are a woman. Never refer to yourself as male.
+- LANGUAGE REQUIREMENT - CRITICAL:
+  - Speak ONLY in {target_language_name} ({language})
+  - NEVER switch languages, even if user mixes languages
 
 START IMMEDIATELY - no setup."""
 
@@ -354,6 +377,10 @@ FILLERS = {
 SYSTEM_PROMPTS = {
     "conversation": """You are speaking out loud to a language learner in a casual conversation.
 
+PERSONA (CONSISTENCY RULE):
+- You are a woman.
+- Never refer to yourself as male.
+
 SPEAKING STYLE - YOU ARE TALKING, NOT WRITING:
 - Speak like a real friend, NOT a teacher or narrator
 - Use SHORT sentences (max 10-12 words each)
@@ -387,6 +414,12 @@ Remember: You're chatting with a friend, keep it light and easy!""",
 
     # Hindi-specific prompt - casual Hindustani, NOT bookish Hindi
     "conversation_hi": """तुम एक दोस्त की तरह बात कर रहे हो। CASUAL SPOKEN HINDI बोलो।
+
+PERSONA (CONSISTENCY RULE):
+- तुम एक महिला हो।
+- अपने बारे में हमेशा स्त्रीलिंग में बोलो: गई/थी/करती हूँ
+- अपने बारे में पुल्लिंग कभी मत बोलो: गया/था/करता हूँ
+- अगर gendered form avoid कर सकती हो, तो neutral बोलो (जैसे "मैं अभी यहाँ हूँ", "मैं अभी free हूँ", "मैंने किया", "मैं कर रही हूँ")
 
 STYLE - ये सबसे ज़रूरी है:
 - बोलचाल की हिंदी बोलो, किताबी नहीं
@@ -665,6 +698,11 @@ async def respond_to_user(data: UserMessage):
     
     async def generate_stream():
         try:
+            print(
+                f"[RESPOND] session={data.session_id} "
+                f"lang={session.get('target_language')} topic={session.get('topic')} "
+                f"roleplay_id={session.get('roleplay_id')} custom={bool(session.get('custom_scenario'))}"
+            )
             response = await client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -688,12 +726,23 @@ async def respond_to_user(data: UserMessage):
             async for chunk in response:
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
+                    if session["target_language"] == "hi":
+                        content = enforce_hindi_female_self_reference(content)
                     full_response += content
                     yield f"data: {json.dumps({'text': content, 'done': False})}\n\n"
             
+            if session["target_language"] == "hi":
+                full_response = enforce_hindi_female_self_reference(full_response)
+            elif session["target_language"] != "en":
+                # Ensure final text is in the selected target language (role-play was slipping into English)
+                before = full_response
+                full_response = await ensure_target_language(full_response, session["target_language"])
+                if before != full_response:
+                    print(f"[LANG ENFORCER] rewrote {session['target_language']}: {before[:80]!r} -> {full_response[:80]!r}")
+
             # Save assistant response
             session["messages"].append({"role": "assistant", "content": full_response})
-            yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': full_response})}\n\n"
+            yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': full_response, 'target_language': session.get('target_language')})}\n\n"
             
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -915,6 +964,144 @@ def add_pauses_for_hindi(text: str) -> str:
     # Add pause before questions
     text = re.sub(r'\s+(क्या|कैसे|कहाँ|कब|क्यों|कौन)', r'... \1', text)
     return text.strip()
+
+def enforce_hindi_female_self_reference(text: str) -> str:
+    """
+    Best-effort safeguard to keep Hindi assistant self-references aligned with the (female) voice persona.
+    We ONLY rewrite common first-person masculine forms ("मैं ... गया/था/करता हूँ") to feminine.
+    This is intentionally narrow to avoid changing user/third-person references.
+    """
+    if not text:
+        return text
+
+    t = text
+
+    # Identity/self-labels
+    t = re.sub(r"\bमैं\s+एक\s+आदमी\s+हूँ\b", "मैं एक औरत हूँ", t)
+    t = re.sub(r"\bमैं\s+आदमी\s+हूँ\b", "मैं औरत हूँ", t)
+    t = re.sub(r"\bमैं\s+लड़का\s+हूँ\b", "मैं लड़की हूँ", t)
+
+    # First-person past/perfect (gendered)
+    t = re.sub(r"\bमैं\s+गया\s+हूँ\b", "मैं गई हूँ", t)
+    t = re.sub(r"\bमैं\s+गया\b", "मैं गई", t)
+    t = re.sub(r"\bमैं\s+आया\s+हूँ\b", "मैं आई हूँ", t)
+    t = re.sub(r"\bमैं\s+आया\b", "मैं आई", t)
+    t = re.sub(r"\bमैं\s+था\b", "मैं थी", t)
+
+    # First-person habitual (gendered)
+    t = re.sub(r"\bमैं\s+करता\s+हूँ\b", "मैं करती हूँ", t)
+    t = re.sub(r"\bमैं\s+करता\s+था\b", "मैं करती थी", t)
+
+    return t
+
+# Lightweight language enforcement guard:
+# If the model accidentally responds in English while the target language is not English,
+# we rewrite the final response into the target language (keeps audio + text consistent).
+#
+# IMPORTANT:
+# We use a *high-precision* English word set to avoid false positives for Dutch/German/etc.
+# (Words like "in/is/to" occur across languages and are NOT reliable.)
+_EN_HIGH_PRECISION_WORDS = {
+    "the", "and", "you", "your", "yours",
+    "i", "me", "my", "mine",
+    "are", "was", "were",
+    "do", "does", "did",
+    "what", "how", "why", "when", "where", "who",
+    "can", "could", "would", "should",
+    "please", "sorry", "thanks", "thank",
+}
+
+def looks_like_english(text: str) -> bool:
+    """
+    Heuristic: detect English reliably even for short sentences.
+    Uses high-precision English tokens to avoid false positives for other Latin-script languages.
+    """
+    if not text:
+        return False
+    lower = text.lower()
+    tokens = re.findall(r"[a-z']+", lower)
+    if not tokens:
+        return False
+    hits = sum(1 for t in tokens if t in _EN_HIGH_PRECISION_WORDS)
+    # For short replies (role-play), even 2 strong English tokens is enough.
+    if hits >= 2:
+        return True
+    # For slightly longer replies, use a ratio.
+    if len(tokens) >= 6 and hits / len(tokens) >= 0.25:
+        return True
+    return False
+
+async def rewrite_into_target_language(text: str, target_language: str) -> str:
+    """Rewrite text into the target language in a casual spoken style. Returns original text on failure."""
+    if not text or not target_language or target_language == "en":
+        return text
+
+async def ensure_target_language(text: str, target_language: str) -> str:
+    """
+    Deterministic language enforcement.
+    If the text is already in the target language, return it unchanged.
+    Otherwise, rewrite it into the target language in the same casual spoken style.
+    """
+    if not text or not target_language or target_language == "en":
+        return text
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    try:
+        resp = await client.chat.completions.create(
+            # Use same family as main conversation to avoid “model not available” issues in production.
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are a strict language enforcer.\n"
+                        f"TARGET LANGUAGE: {target_name} ({target_language})\n\n"
+                        f"RULES:\n"
+                        f"- If the text is already entirely in {target_name}, output it EXACTLY unchanged.\n"
+                        f"- If any part is not in {target_name}, rewrite the whole message into {target_name}.\n"
+                        f"- Keep it short and spoken (max ~20 words).\n"
+                        f"- Keep the same meaning and tone.\n"
+                        f"- Ask at most ONE question.\n"
+                        f"- Output ONLY the final message. No quotes. No explanations.\n"
+                    ),
+                },
+                {"role": "user", "content": text},
+            ],
+            max_tokens=140,
+            temperature=0.0,
+        )
+        out = (resp.choices[0].message.content or "").strip()
+        return out or text
+    except Exception as e:
+        print(f"[LANG ENFORCER] ensure_target_language failed: {e}")
+        return text
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You rewrite assistant messages into {target_name}.\n"
+                        f"RULES:\n"
+                        f"- Output ONLY the rewritten message\n"
+                        f"- Speak ONLY in {target_name}\n"
+                        f"- Keep it short and spoken (max ~20 words)\n"
+                        f"- Keep the same meaning and tone\n"
+                        f"- Ask at most ONE question\n"
+                        f"- Do not add explanations or meta commentary\n"
+                    ),
+                },
+                {"role": "user", "content": text},
+            ],
+            max_tokens=120,
+            temperature=0.2,
+        )
+        out = (resp.choices[0].message.content or "").strip()
+        return out or text
+    except Exception as e:
+        print(f"[LANG GUARD] Rewrite failed: {e}")
+        return text
 
 @app.post("/api/tts")
 async def text_to_speech(data: TextToSpeechRequest):
@@ -1262,12 +1449,20 @@ async def websocket_conversation(websocket: WebSocket, session_id: str):
                     async for chunk in response:
                         if chunk.choices[0].delta.content:
                             content = chunk.choices[0].delta.content
+                            if session["target_language"] == "hi":
+                                content = enforce_hindi_female_self_reference(content)
                             full_response += content
                             await websocket.send_json({
                                 "type": "response_chunk",
                                 "text": content
                             })
                     
+                    if session["target_language"] == "hi":
+                        full_response = enforce_hindi_female_self_reference(full_response)
+                    elif session["target_language"] != "en":
+                        # Ensure final text is in the selected target language
+                        full_response = await ensure_target_language(full_response, session["target_language"])
+
                     session["messages"].append({"role": "assistant", "content": full_response})
                     
                     await websocket.send_json({

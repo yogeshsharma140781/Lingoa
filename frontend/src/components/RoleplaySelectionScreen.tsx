@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { useStore } from '../store'
+import { API_BASE } from '../hooks/useApi'
 
 interface RoleplayScenario {
   id: string
@@ -20,8 +21,14 @@ export function RoleplaySelectionScreen() {
 
   useEffect(() => {
     // Fetch scenarios from backend
-    fetch('/api/roleplay/scenarios')
-      .then(res => res.json())
+    fetch(`${API_BASE}/roleplay/scenarios`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(`Failed to load scenarios: ${res.status} ${text}`)
+        }
+        return res.json()
+      })
       .then(data => {
         setCategories(data.categories || [])
         setLoading(false)

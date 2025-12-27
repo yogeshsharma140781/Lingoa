@@ -11,12 +11,14 @@ export function ModeSelectionScreen() {
   }
 
   const handleTopics = () => {
-    unlockAudio()
+    // Unlock audio in background (non-blocking)
+    unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
     setScreen('topics')
   }
 
   const handleRoleplay = () => {
-    unlockAudio()
+    // Unlock audio in background (non-blocking)
+    unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
     setScreen('roleplay')
   }
 

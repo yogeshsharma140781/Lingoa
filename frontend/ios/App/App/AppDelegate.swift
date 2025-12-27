@@ -9,17 +9,38 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Configure audio session to play audio even in silent mode (like Music app)
+        configureAudioSession()
+        
+        return true
+    }
+    
+    func configureAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // Use playAndRecord since we need both microphone input and audio output
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-            try audioSession.setActive(true)
-            print("[Audio] Audio session configured for playback in silent mode")
+            // Use .playAndRecord since we need both microphone and audio output
+            // .defaultToSpeaker ensures audio plays through speaker (works in silent mode)
+            // .allowBluetoothA2DP and .allowBluetoothHFP allow Bluetooth audio devices
+            // .mixWithOthers allows mixing with other audio
+            // Note: .playAndRecord with .defaultToSpeaker should play in silent mode
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .allowBluetoothHFP, .mixWithOthers])
+            try audioSession.setActive(true, options: [])
+            print("[Audio] Audio session configured for playback and recording (silent mode enabled)")
         } catch {
             print("[Audio] Failed to configure audio session: \(error)")
         }
-        
-        return true
+    }
+    
+    // Configure audio session for recording (needs microphone)
+    func configureAudioSessionForRecording() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            // Use .playAndRecord when we need microphone input
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .allowBluetoothHFP, .mixWithOthers])
+            try audioSession.setActive(true, options: [])
+            print("[Audio] Audio session configured for recording")
+        } catch {
+            print("[Audio] Failed to configure audio session for recording: \(error)")
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -34,18 +55,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationWillEnterForeground(_ application: UIApplication) {
         // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
+        
+        // Reactivate audio session when coming to foreground
+        configureAudioSession()
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
         
-        // Reactivate audio session to ensure audio plays even in silent mode
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setActive(true)
-        } catch {
-            print("[Audio] Failed to reactivate audio session: \(error)")
-        }
+        // Reconfigure and reactivate audio session to ensure audio plays even in silent mode
+        configureAudioSession()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

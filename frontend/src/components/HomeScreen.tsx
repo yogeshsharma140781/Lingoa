@@ -117,7 +117,8 @@ export function HomeScreen() {
       >
         <button
           onClick={() => {
-            unlockAudio() // Unlock audio on mobile before navigating
+            // Unlock audio in background (non-blocking) - it will be ready by conversation time
+            unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
             setScreen('mode')
           }}
           className="w-full btn-primary rounded-2xl py-5 flex items-center justify-center gap-3 font-semibold text-lg text-white shadow-lg"
