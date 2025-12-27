@@ -49,5 +49,7 @@
 	<string>Lingoa needs microphone access to record your voice for language practice conversations.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lingoa needs speech recognition to transcribe your voice for language learning feedback.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

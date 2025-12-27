@@ -323,10 +323,10 @@ export function ConversationScreen() {
           className="text-center mb-8"
         >
           <h2 className="font-display text-3xl font-bold mb-4">
-            Enable Your Microphone
+            Microphone Access Required
           </h2>
           <p className="text-surface-400 text-lg max-w-xs mx-auto">
-            We need access to your microphone to hear you speak and help improve your fluency.
+            Lingoa needs microphone access to record your voice for language practice conversations. Your audio is only used during the conversation and is not stored permanently.
           </p>
         </motion.div>
 
@@ -349,30 +349,12 @@ export function ConversationScreen() {
             ) : (
               <>
                 <Mic className="w-5 h-5" />
-                Allow Microphone
+                Continue
               </>
             )}
           </button>
-
-          <button
-            onClick={() => {
-              resetSession()
-              setScreen('home')
-            }}
-            className="w-full glass rounded-2xl py-3 font-medium text-surface-400 hover:bg-white/10 transition-colors"
-          >
-            Go Back
-          </button>
         </motion.div>
 
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="text-surface-500 text-sm mt-8 text-center max-w-xs"
-        >
-          Your audio is only used during the conversation and is not stored permanently.
-        </motion.p>
       </motion.div>
     )
   }
