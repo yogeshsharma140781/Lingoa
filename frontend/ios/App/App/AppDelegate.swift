@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,7 +8,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Configure audio session to play audio even in silent mode (like Music app)
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            // Use playAndRecord since we need both microphone input and audio output
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try audioSession.setActive(true)
+            print("[Audio] Audio session configured for playback in silent mode")
+        } catch {
+            print("[Audio] Failed to configure audio session: \(error)")
+        }
+        
         return true
     }
 
@@ -27,6 +38,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        
+        // Reactivate audio session to ensure audio plays even in silent mode
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setActive(true)
+        } catch {
+            print("[Audio] Failed to reactivate audio session: \(error)")
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
