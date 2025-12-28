@@ -1180,6 +1180,25 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
     if not user_text or not expected:
         return False
 
+    def _tokenize_latin(s: str) -> list[str]:
+        # Keep unicode letters (incl accents) + apostrophes; drop punctuation.
+        tokens = re.findall(r"[^\W\d_']+(?:'[^\W\d_']+)?", s.lower(), flags=re.UNICODE)
+        # Drop very short tokens to reduce false positives ("a", "de", etc.)
+        return [t for t in tokens if len(t) >= 3]
+
+    # Deterministic guardrail for Latin-script target languages:
+    # Require some lexical overlap with the expected target sentence.
+    # This prevents clearing when the user keeps speaking English.
+    if target_language in {"es", "fr", "de", "nl", "it", "pt", "en"}:
+        u = set(_tokenize_latin(user_text))
+        e = set(_tokenize_latin(expected))
+        # If expected is too short, skip this check.
+        if e:
+            overlap = len(u & e)
+            # Require at least 2 shared content tokens.
+            if overlap < 2:
+                return False
+
     # Deterministic guardrails: do NOT clear pending translation if the user is clearly not speaking
     # in the target language. This prevents the flow from progressing when the user keeps speaking English.
     if target_language != "en" and looks_like_english(user_text):
