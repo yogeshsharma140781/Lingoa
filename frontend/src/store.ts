@@ -54,6 +54,12 @@ export interface Correction {
   audioUrl?: string       // Audio URL for playback
 }
 
+export interface TranslationAssist {
+  source: string
+  translation: string
+  alternative?: string | null
+}
+
 interface AppState {
   // Navigation
   currentScreen: Screen
@@ -113,6 +119,10 @@ interface AppState {
   // Real-time corrections
   currentCorrection: Correction | null
   setCurrentCorrection: (correction: Correction | null) => void
+
+  // Translation assist (momentary)
+  currentTranslation: TranslationAssist | null
+  setCurrentTranslation: (translation: TranslationAssist | null) => void
 
   // Microphone
   micPermission: 'prompt' | 'granted' | 'denied'
@@ -213,6 +223,10 @@ export const useStore = create<AppState>((set) => ({
   currentCorrection: null,
   setCurrentCorrection: (correction) => set({ currentCorrection: correction }),
 
+  // Translation assist
+  currentTranslation: null,
+  setCurrentTranslation: (translation) => set({ currentTranslation: translation }),
+
   // Microphone
   micPermission: 'prompt',
   setMicPermission: (status) => set({ micPermission: status }),
@@ -232,6 +246,7 @@ export const useStore = create<AppState>((set) => ({
     isProcessing: false,
     improvements: [],
     currentCorrection: null,
+    currentTranslation: null,
     selectedTopic: null,
     selectedRoleplayId: null,
     customScenario: null,

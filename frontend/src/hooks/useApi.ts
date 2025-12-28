@@ -158,6 +158,7 @@ export function useApi() {
     setIsAiSpeaking,
     audioSpeed,
     setCurrentCorrection,
+    setCurrentTranslation,
     selectedTopic,
     selectedRoleplayId,
     customScenario,
@@ -330,6 +331,15 @@ export function useApi() {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6))
+              // Translation assist payload (shown on screen only; NOT spoken automatically)
+              if (data.type === 'translation' && data.translation) {
+                setCurrentTranslation({
+                  source: data.source || '',
+                  translation: data.translation,
+                  alternative: data.alternative ?? null,
+                })
+                continue
+              }
               if (data.text) {
                 appendAiMessage(data.text)
                 fullResponse += data.text
@@ -351,7 +361,7 @@ export function useApi() {
       console.error('AI response error:', err)
     }
     return null
-  }, [sessionId, appendAiMessage])
+  }, [sessionId, appendAiMessage, setCurrentTranslation, setAiMessage])
 
   // Text to speech - uses regular TTS endpoint (handles ElevenLabs/OpenAI fallback server-side)
   const textToSpeech = useCallback(async (text: string): Promise<void> => {

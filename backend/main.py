@@ -692,10 +692,6 @@ async def respond_to_user(data: UserMessage):
     
     session = sessions[data.session_id]
     
-    # Add user message
-    session["messages"].append({"role": "user", "content": data.transcript})
-    session["user_utterances"].append(data.transcript)
-    
     async def generate_stream():
         try:
             print(
@@ -703,6 +699,29 @@ async def respond_to_user(data: UserMessage):
                 f"lang={session.get('target_language')} topic={session.get('topic')} "
                 f"roleplay_id={session.get('roleplay_id')} custom={bool(session.get('custom_scenario'))}"
             )
+
+            target_language = session.get("target_language", "en")
+
+            # Translation assist is a momentary aid (no mode switch)
+            if detect_translation_intent(data.transcript, target_language):
+                try:
+                    assist = await generate_translation_assist(data.transcript, target_language, session)
+                    if assist.get("translation"):
+                        yield f"data: {json.dumps({'type': 'translation', 'source': data.transcript, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
+                except Exception as e:
+                    print(f"[TRANSLATION ASSIST] failed: {e}")
+
+                # Speak a tiny nudge (do NOT read the translation aloud)
+                spoken = translation_nudge(target_language)
+                session["messages"].append({"role": "assistant", "content": spoken})
+                yield f"data: {json.dumps({'text': spoken, 'done': False})}\n\n"
+                yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': spoken, 'target_language': target_language})}\n\n"
+                return
+
+            # Normal conversation: add user message to context
+            session["messages"].append({"role": "user", "content": data.transcript})
+            session["user_utterances"].append(data.transcript)
+
             response = await client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -1030,6 +1049,123 @@ def looks_like_english(text: str) -> bool:
     if len(tokens) >= 6 and hits / len(tokens) >= 0.25:
         return True
     return False
+
+def detect_translation_intent(transcript: str, target_language: str) -> bool:
+    """
+    Soft detection:
+    - explicit phrases like "How do you say..." / "What's X in French"
+    - or user clearly speaks in English while target language is not English
+    - or Devanagari while target is English
+    """
+    if not transcript:
+        return False
+    t = transcript.strip().lower()
+
+    # Explicit "how do you say" patterns (common user language = English)
+    explicit_markers = [
+        "how do you say",
+        "how do i say",
+        "what's",
+        "what is",
+        "in french",
+        "in spanish",
+        "in german",
+        "in dutch",
+        "in italian",
+        "in portuguese",
+        "in hindi",
+        "in chinese",
+        "in japanese",
+        "in korean",
+    ]
+    if any(m in t for m in explicit_markers) and ("say" in t or "in " in t):
+        return True
+
+    # If target is not English and user speaks English, treat as translation assist
+    if target_language != "en" and looks_like_english(transcript):
+        return True
+
+    # If target is English and user uses Devanagari (Hindi), treat as translation assist
+    if target_language == "en" and re.search(r"[\u0900-\u097F]", transcript):
+        return True
+
+    return False
+
+async def generate_translation_assist(transcript: str, target_language: str, session: dict) -> dict:
+    """
+    Generate a natural spoken translation (on-screen only).
+    Returns {translation, alternative?}.
+    """
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    roleplay_id = session.get("roleplay_id")
+    custom_scenario = session.get("custom_scenario")
+    topic = session.get("topic", "random")
+
+    context_bits = []
+    if roleplay_id:
+        scenario = ROLEPLAY_SCENARIOS.get(roleplay_id)
+        if scenario:
+            context_bits.append(f"Role-play: {scenario['name']} ({scenario['ai_role']} in a {scenario['setting']})")
+    if custom_scenario:
+        context_bits.append(f"Custom scenario: {custom_scenario}")
+    if topic and topic != "roleplay":
+        context_bits.append(f"Topic: {topic}")
+    context_str = "\n".join(context_bits) if context_bits else "General conversation."
+
+    # Ask model for a spoken, context-aware translation (no lesson)
+    resp = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    f"You generate quick 'How do you say…?' translations for a speaking app.\n"
+                    f"TARGET LANGUAGE: {target_name} ({target_language})\n\n"
+                    f"RULES:\n"
+                    f"- Output JSON only.\n"
+                    f"- Provide a natural SPOKEN translation (not literal/textbook).\n"
+                    f"- Keep it short (<= 12 words for Hindi, <= 16 words otherwise).\n"
+                    f"- No grammar explanations.\n"
+                    f"- No word-by-word breakdown.\n"
+                    f"- Optionally provide ONE alternative if it helps.\n"
+                    f"- Use native script (Devanagari for Hindi, etc.).\n"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Context:\n{context_str}\n\n"
+                    f"User asked (may be in another language):\n{transcript}\n\n"
+                    f"Return JSON like:\n"
+                    f'{{"translation":"...","alternative":"..."}}'
+                ),
+            },
+        ],
+        response_format={"type": "json_object"},
+        max_tokens=180,
+        temperature=0.2,
+    )
+    data = json.loads(resp.choices[0].message.content or "{}")
+    translation = (data.get("translation") or "").strip()
+    alternative = (data.get("alternative") or "").strip() if data.get("alternative") else None
+    return {"translation": translation, "alternative": alternative}
+
+def translation_nudge(language: str) -> str:
+    """Short spoken guidance (TTS) when translation assist is shown on-screen."""
+    nudges = {
+        "hi": "ऐसे कह सकते हो। स्क्रीन पर देखो… अब तुम बोलो।",
+        "es": "Así puedes decirlo. Mira la pantalla… y ahora tú.",
+        "fr": "Tu peux dire ça. Regarde l’écran… à toi.",
+        "de": "So kannst du’s sagen. Schau kurz auf den Bildschirm… und jetzt du.",
+        "nl": "Zo kun je het zeggen. Kijk even op het scherm… en nu jij.",
+        "it": "Puoi dirlo così. Guarda lo schermo… e ora tu.",
+        "pt": "Você pode dizer assim. Olha a tela… e agora você.",
+        "zh": "可以这样说。看一下屏幕…现在你说。",
+        "ja": "こう言えるよ。画面を見て…じゃあ言ってみて。",
+        "ko": "이렇게 말하면 돼. 화면 보고… 이제 네가 말해.",
+        "en": "You can say it like this. Look at the screen… and now you.",
+    }
+    return nudges.get(language, nudges["en"])
 
 async def rewrite_into_target_language(text: str, target_language: str) -> str:
     """Rewrite text into the target language in a casual spoken style. Returns original text on failure."""

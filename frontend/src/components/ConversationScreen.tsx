@@ -6,6 +6,7 @@ import { useStore } from '../store'
 import { useApi, unlockAudio } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { CorrectionCard } from './CorrectionCard'
+import { TranslationCard } from './TranslationCard'
 
 // Speed options (UI labels - actual speed is mapped in useApi)
 const SPEED_OPTIONS = [0.8, 0.9, 1.0]
@@ -30,6 +31,8 @@ export function ConversationScreen() {
     isProcessing,
     setIsProcessing,
     currentCorrection,
+    currentTranslation,
+    setCurrentTranslation,
     audioSilentMode,
     setAudioSilentMode,
   } = useStore()
@@ -241,6 +244,9 @@ export function ConversationScreen() {
   // Handle "Done" button - user manually triggers AI response
   const handleDone = async () => {
     if (isProcessing || isAiSpeaking) return
+
+    // Clear any previous translation assist moment when user submits a new turn
+    setCurrentTranslation(null)
     
     setIsWaitingForUser(false)
     setIsProcessing(true)
@@ -721,6 +727,16 @@ export function ConversationScreen() {
           )}
           
           {/* Inline Correction */}
+          {currentTranslation && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 w-full max-w-sm"
+            >
+              <TranslationCard translation={currentTranslation} />
+            </motion.div>
+          )}
+
           {currentCorrection && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
