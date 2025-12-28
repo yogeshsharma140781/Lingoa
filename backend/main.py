@@ -705,9 +705,10 @@ async def respond_to_user(data: UserMessage):
             # Translation assist is a momentary aid (no mode switch)
             if detect_translation_intent(data.transcript, target_language):
                 try:
-                    assist = await generate_translation_assist(data.transcript, target_language, session)
+                    payload = extract_translation_payload(data.transcript)
+                    assist = await generate_translation_assist(payload, target_language, session)
                     if assist.get("translation"):
-                        yield f"data: {json.dumps({'type': 'translation', 'source': data.transcript, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
+                        yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
                 except Exception as e:
                     print(f"[TRANSLATION ASSIST] failed: {e}")
 
@@ -1091,6 +1092,45 @@ def detect_translation_intent(transcript: str, target_language: str) -> bool:
 
     return False
 
+def extract_translation_payload(transcript: str) -> str:
+    """
+    If the user says "How do you say ...?" we should translate ONLY the payload,
+    not the wrapper phrase itself.
+    Falls back to returning the original transcript if no payload can be extracted.
+    """
+    if not transcript:
+        return transcript
+
+    raw = transcript.strip()
+
+    def _clean(s: str) -> str:
+        s = s.strip()
+        s = re.sub(r'^[\s"“”\'‘’]+', '', s)
+        s = re.sub(r'[\s"“”\'‘’]+$', '', s)
+        s = re.sub(r'^[\s:,-]+', '', s)
+        s = re.sub(r'[\s\?\!\.]+$', '', s)
+        return s.strip()
+
+    # 1) "How do you say X" / "How do I say X"
+    m = re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b\s*(.+)$", raw, flags=re.IGNORECASE)
+    if m:
+        payload = m.group(1)
+        # Remove trailing "in <language>" if present
+        payload = re.sub(r"\s+in\s+[a-z\s\(\)]+$", "", payload, flags=re.IGNORECASE).strip()
+        return _clean(payload) or raw
+
+    # 2) "What's X in French" / "What is X in Spanish"
+    m = re.search(r"\bwhat\s+(?:is|\'s)\b\s*(.+?)\s+\bin\s+[a-z\s\(\)]+$", raw, flags=re.IGNORECASE)
+    if m:
+        return _clean(m.group(1)) or raw
+
+    # 3) Quoted payload anywhere: "... 'X' ..."
+    m = re.search(r"[\"“”'‘’]([^\"“”'‘’]{1,200})[\"“”'‘’]", raw)
+    if m:
+        return _clean(m.group(1)) or raw
+
+    return raw
+
 async def generate_translation_assist(transcript: str, target_language: str, session: dict) -> dict:
     """
     Generate a natural spoken translation (on-screen only).
@@ -1129,13 +1169,14 @@ async def generate_translation_assist(transcript: str, target_language: str, ses
                     f"- No word-by-word breakdown.\n"
                     f"- Optionally provide ONE alternative if it helps.\n"
                     f"- Use native script (Devanagari for Hindi, etc.).\n"
+                    f"- Translate ONLY the phrase provided. Do NOT translate wrapper text like 'how do you say'.\n"
                 ),
             },
             {
                 "role": "user",
                 "content": (
                     f"Context:\n{context_str}\n\n"
-                    f"User asked (may be in another language):\n{transcript}\n\n"
+                    f"Phrase to translate (may be in another language):\n{transcript}\n\n"
                     f"Return JSON like:\n"
                     f'{{"translation":"...","alternative":"..."}}'
                 ),
