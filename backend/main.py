@@ -712,7 +712,17 @@ async def respond_to_user(data: UserMessage):
                         payload = extract_translation_payload(data.transcript)
                         if re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b", payload, flags=re.IGNORECASE):
                             payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
+                    # Final safety: strip wrapper even if classifier returned it
+                    payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
+                    if not payload:
+                        raise ValueError("Empty translation payload")
                     assist = await generate_translation_assist(payload, target_language, session)
+                    assist = await ensure_translation_only(
+                        payload=payload,
+                        target_language=target_language,
+                        translation=assist.get("translation", ""),
+                        alternative=assist.get("alternative"),
+                    )
                     if assist.get("translation"):
                         yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
                 except Exception as e:
@@ -1261,6 +1271,57 @@ async def generate_translation_assist(transcript: str, target_language: str, ses
     translation = (data.get("translation") or "").strip()
     alternative = (data.get("alternative") or "").strip() if data.get("alternative") else None
     return {"translation": translation, "alternative": alternative}
+
+async def ensure_translation_only(payload: str, target_language: str, translation: str, alternative: str | None = None) -> dict:
+    """
+    Hard guardrail: ensure the output is ONLY the translation of the payload,
+    not meta text like "how do you say...".
+    """
+    if not translation or not payload or not target_language:
+        return {"translation": translation, "alternative": alternative}
+
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You clean translation-assist output for a speaking app.\n"
+                        f"TARGET LANGUAGE: {target_name} ({target_language})\n\n"
+                        f"RULES:\n"
+                        f"- Output JSON only.\n"
+                        f"- 'translation' MUST be ONLY the natural spoken translation of the payload.\n"
+                        f"- NEVER include wrappers like 'how do you say', 'the translation is', 'in {target_name}', etc.\n"
+                        f"- Keep it short and spoken.\n"
+                        f"- Use native script.\n"
+                        f"- Optionally keep ONE alternative.\n"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "payload": payload,
+                            "candidate_translation": translation,
+                            "candidate_alternative": alternative,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=180,
+            temperature=0.0,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        cleaned_translation = (data.get("translation") or "").strip() or translation
+        cleaned_alternative = (data.get("alternative") or "").strip() if data.get("alternative") else alternative
+        return {"translation": cleaned_translation, "alternative": cleaned_alternative}
+    except Exception as e:
+        print(f"[TRANSLATION ASSIST] ensure_translation_only failed: {e}")
+        return {"translation": translation, "alternative": alternative}
 
 def translation_nudge(language: str) -> str:
     """Short spoken guidance (TTS) when translation assist is shown on-screen."""
