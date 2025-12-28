@@ -1170,8 +1170,11 @@ def likely_in_target_language(text: str, target_language: str) -> bool:
 
 async def check_user_repeated_translation(user_text: str, target_language: str, expected: str) -> bool:
     """
-    Decide if the user said the translated phrase (roughly).
-    We allow small differences. No teaching, just a gate.
+    Gate for "translation pending" flow.
+    Only return True if:
+      1) The user's utterance is primarily in the target language, AND
+      2) It matches the expected phrase meaning (lenient to small mistakes).
+    This prevents clearing the translation when the user keeps speaking in English.
     """
     if not user_text or not expected:
         return False
@@ -1184,10 +1187,14 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
                 {
                     "role": "system",
                     "content": (
-                        f"You judge if a learner repeated a target phrase in {target_name}.\n"
-                        f"Return JSON only: {{\"said_it\": true/false}}.\n"
-                        f"Be lenient: allow minor word order, articles, small mistakes.\n"
-                        f"Require same core meaning.\n"
+                        "You are a strict but fair gate for a speaking practice app.\n\n"
+                        f"TARGET LANGUAGE: {target_name} ({target_language})\n\n"
+                        "Return JSON only: {\"in_target_language\": true/false, \"said_it\": true/false}.\n\n"
+                        "Rules:\n"
+                        "- in_target_language=true ONLY if the user's utterance is primarily in the target language.\n"
+                        "- If target_language is not English, and the user utterance is English, in_target_language must be false.\n"
+                        "- said_it=true ONLY if the user meaningfully said the expected phrase (allow minor mistakes).\n"
+                        "- If in_target_language is false, said_it must be false.\n"
                     ),
                 },
                 {
@@ -1199,11 +1206,13 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
                 },
             ],
             response_format={"type": "json_object"},
-            max_tokens=40,
+            max_tokens=60,
             temperature=0.0,
         )
         data = json.loads(resp.choices[0].message.content or "{}")
-        return bool(data.get("said_it"))
+        in_lang = bool(data.get("in_target_language"))
+        said_it = bool(data.get("said_it"))
+        return in_lang and said_it
     except Exception as e:
         print(f"[TRANSLATION ASSIST] repeat check failed: {e}")
         return False
