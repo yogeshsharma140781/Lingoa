@@ -41,6 +41,9 @@ IS_PRODUCTION = FRONTEND_BUILD_PATH.exists()
 # Initialize OpenAI client
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Build/version info (useful for debugging deploys)
+APP_BUILD_TAG = "translation-pending-gate-v3"
+
 # In-memory storage (replace with DB in production)
 sessions = {}
 user_streaks = {}
@@ -711,11 +714,13 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
                 # If user said it (in target language), clear and continue with normal conversation
-                if await check_user_repeated_translation(
+                said_it = await check_user_repeated_translation(
                     user_text=data.transcript,
                     target_language=target_language,
                     expected=expected,
-                ):
+                )
+                print(f"[TRANSLATION PENDING] lang={target_language} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
+                if said_it:
                     session["translation_pending"] = None
                     yield f"data: {json.dumps({'type': 'translation_clear'})}\n\n"
                     # Now proceed as normal with this user utterance as the next message in context
@@ -2411,6 +2416,8 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "lingoa-api",
+        "build_tag": APP_BUILD_TAG,
+        "render_git_commit": os.getenv("RENDER_GIT_COMMIT"),
         "tts_provider": get_tts_provider_type(),
         "elevenlabs_key_present": bool(os.getenv("ELEVENLABS_API_KEY"))
     }
