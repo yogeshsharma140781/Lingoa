@@ -705,10 +705,13 @@ async def respond_to_user(data: UserMessage):
             # Translation assist is a momentary aid (no mode switch)
             if detect_translation_intent(data.transcript, target_language):
                 try:
-                    payload = extract_translation_payload(data.transcript)
-                    # Absolute safety: never translate the wrapper phrase if it still remains.
-                    if re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b", payload, flags=re.IGNORECASE):
-                        payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
+                    classified = await classify_translation_request(data.transcript, target_language, session)
+                    payload = classified.get("payload") or ""
+                    # Fallback to regex-based extraction if classifier couldn't extract
+                    if not payload:
+                        payload = extract_translation_payload(data.transcript)
+                        if re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b", payload, flags=re.IGNORECASE):
+                            payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
                     assist = await generate_translation_assist(payload, target_language, session)
                     if assist.get("translation"):
                         yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
@@ -1134,6 +1137,70 @@ def extract_translation_payload(transcript: str) -> str:
         return _clean(m.group(1)) or raw
 
     return raw
+
+async def classify_translation_request(transcript: str, target_language: str, session: dict) -> dict:
+    """
+    LLM-based intent + payload extraction (robust to varied phrasing).
+    Returns:
+      { "needs_translation": bool, "payload": str }
+    Payload is what the user wants to express (without wrappers like "how do you say").
+    """
+    if not transcript:
+        return {"needs_translation": False, "payload": ""}
+
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    roleplay_id = session.get("roleplay_id")
+    custom_scenario = session.get("custom_scenario")
+    topic = session.get("topic", "random")
+
+    context_bits = []
+    if roleplay_id:
+        scenario = ROLEPLAY_SCENARIOS.get(roleplay_id)
+        if scenario:
+            context_bits.append(f"Role-play: {scenario['name']} ({scenario['ai_role']} in a {scenario['setting']})")
+    if custom_scenario:
+        context_bits.append(f"Custom scenario: {custom_scenario}")
+    if topic and topic != "roleplay":
+        context_bits.append(f"Topic: {topic}")
+    context_str = "\n".join(context_bits) if context_bits else "General conversation."
+
+    system = (
+        "You are an intent detector for a speaking practice app.\n"
+        "Goal: detect when the user wants quick translation help, and extract ONLY the phrase they want to say.\n\n"
+        f"TARGET LANGUAGE the user is learning: {target_name} ({target_language}).\n\n"
+        "Return JSON only.\n\n"
+        "Rules:\n"
+        "- If the user is asking for translation help OR is clearly speaking in a different language than the target, set needs_translation=true.\n"
+        "- Otherwise needs_translation=false.\n"
+        "- payload must be ONLY what they want to say (e.g. 'I need an appointment'), not the wrapper.\n"
+        "- Remove wrappers like: 'how do you say', 'what's X in', 'translate', 'in French', etc.\n"
+        "- If there is no clear payload, set needs_translation=false.\n"
+        "- Do NOT translate into the target language here. Only extract payload.\n"
+    )
+
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Context:\n{context_str}\n\nUser said:\n{transcript}"},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=120,
+            temperature=0.0,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        needs = bool(data.get("needs_translation"))
+        payload = (data.get("payload") or "").strip()
+        # Safety: never let wrapper leak through as payload
+        if payload and re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b", payload, flags=re.IGNORECASE):
+            payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
+        if not payload:
+            needs = False
+        return {"needs_translation": needs, "payload": payload}
+    except Exception as e:
+        print(f"[TRANSLATION ASSIST] classify_translation_request failed: {e}")
+        return {"needs_translation": False, "payload": ""}
 
 async def generate_translation_assist(transcript: str, target_language: str, session: dict) -> dict:
     """
