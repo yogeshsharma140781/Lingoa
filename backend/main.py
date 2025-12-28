@@ -1180,6 +1180,19 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
     if not user_text or not expected:
         return False
 
+    # Deterministic guardrails: do NOT clear pending translation if the user is clearly not speaking
+    # in the target language. This prevents the flow from progressing when the user keeps speaking English.
+    if target_language != "en" and looks_like_english(user_text):
+        return False
+    if target_language == "hi" and not re.search(r"[\u0900-\u097F]", user_text):
+        return False
+    if target_language == "zh" and not re.search(r"[\u4E00-\u9FFF]", user_text):
+        return False
+    if target_language == "ja" and not re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", user_text):
+        return False
+    if target_language == "ko" and not re.search(r"[\uAC00-\uD7AF]", user_text):
+        return False
+
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")
     try:
         resp = await client.chat.completions.create(
@@ -1194,7 +1207,8 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
                         "Rules:\n"
                         "- in_target_language=true ONLY if the user's utterance is primarily in the target language.\n"
                         "- If target_language is not English, and the user utterance is English, in_target_language must be false.\n"
-                        "- said_it=true ONLY if the user meaningfully said the expected phrase (allow minor mistakes).\n"
+                        "- said_it=true ONLY if the user closely repeated the expected phrase (not just a related idea).\n"
+                        "- Require that the user's utterance preserves the same core meaning AND includes at least two key content words from the expected phrase (or clear equivalents).\n"
                         "- If in_target_language is false, said_it must be false.\n"
                     ),
                 },
