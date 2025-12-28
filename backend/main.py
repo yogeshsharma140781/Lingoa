@@ -706,6 +706,9 @@ async def respond_to_user(data: UserMessage):
             if detect_translation_intent(data.transcript, target_language):
                 try:
                     payload = extract_translation_payload(data.transcript)
+                    # Absolute safety: never translate the wrapper phrase if it still remains.
+                    if re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b", payload, flags=re.IGNORECASE):
+                        payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
                     assist = await generate_translation_assist(payload, target_language, session)
                     if assist.get("translation"):
                         yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
@@ -1112,7 +1115,8 @@ def extract_translation_payload(transcript: str) -> str:
         return s.strip()
 
     # 1) "How do you say X" / "How do I say X"
-    m = re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b\s*(.+)$", raw, flags=re.IGNORECASE)
+    # Allow punctuation after "say" because Whisper often produces "How do you say: ..."
+    m = re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*([\s\S]+)$", raw, flags=re.IGNORECASE)
     if m:
         payload = m.group(1)
         # Remove trailing "in <language>" if present
