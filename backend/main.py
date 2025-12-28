@@ -711,7 +711,7 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
                 # If user said it (in target language), clear and continue with normal conversation
-                if likely_in_target_language(data.transcript, target_language) and await check_user_repeated_translation(
+                if await check_user_repeated_translation(
                     user_text=data.transcript,
                     target_language=target_language,
                     expected=expected,
@@ -727,10 +727,11 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': spoken, 'target_language': target_language})}\n\n"
                     return
 
-            # Translation assist is a momentary aid (no mode switch)
-            if detect_translation_intent(data.transcript, target_language) or not likely_in_target_language(data.transcript, target_language):
+            # Translation assist:
+            # If user asks for help OR speaks in a different language than the target, show translation and wait.
+            classified = await classify_translation_request(data.transcript, target_language, session)
+            if classified.get("needs_translation"):
                 try:
-                    classified = await classify_translation_request(data.transcript, target_language, session)
                     payload = classified.get("payload") or ""
                     # Fallback to regex-based extraction if classifier couldn't extract
                     if not payload:
@@ -1297,9 +1298,9 @@ async def classify_translation_request(transcript: str, target_language: str, se
         "- Do NOT translate into the target language here. Only extract payload.\n"
     )
 
-    try:
+    async def _call(model_name: str) -> dict:
         resp = await client.chat.completions.create(
-            model="gpt-4o",
+            model=model_name,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": f"Context:\n{context_str}\n\nUser said:\n{transcript}"},
@@ -1308,12 +1309,24 @@ async def classify_translation_request(transcript: str, target_language: str, se
             max_tokens=120,
             temperature=0.0,
         )
-        data = json.loads(resp.choices[0].message.content or "{}")
+        return json.loads(resp.choices[0].message.content or "{}")
+
+    try:
+        # Prefer mini for cost/latency; fall back to gpt-4o for reliability.
+        try:
+            data = await _call("gpt-4o-mini")
+        except Exception as e:
+            print(f"[TRANSLATION ASSIST] classifier mini failed, falling back to gpt-4o: {e}")
+            data = await _call("gpt-4o")
+
         needs = bool(data.get("needs_translation"))
         payload = (data.get("payload") or "").strip()
+
         # Safety: never let wrapper leak through as payload
         if payload and re.search(r"\bhow\s+do\s+(?:you|i)\s+say\b", payload, flags=re.IGNORECASE):
             payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
+        payload = re.sub(r"^\s*how\s+do\s+(?:you|i)\s+say\b[\s:,\-\—\–…]*", "", payload, flags=re.IGNORECASE).strip()
+
         if not payload:
             needs = False
         return {"needs_translation": needs, "payload": payload}
