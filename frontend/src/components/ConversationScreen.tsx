@@ -32,7 +32,6 @@ export function ConversationScreen() {
     setIsProcessing,
     currentCorrection,
     currentTranslation,
-    setCurrentTranslation,
     audioSilentMode,
     setAudioSilentMode,
   } = useStore()
@@ -244,9 +243,6 @@ export function ConversationScreen() {
   // Handle "Done" button - user manually triggers AI response
   const handleDone = async () => {
     if (isProcessing || isAiSpeaking) return
-
-    // Clear any previous translation assist moment when user submits a new turn
-    setCurrentTranslation(null)
     
     setIsWaitingForUser(false)
     setIsProcessing(true)

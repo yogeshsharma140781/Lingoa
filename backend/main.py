@@ -702,8 +702,33 @@ async def respond_to_user(data: UserMessage):
 
             target_language = session.get("target_language", "en")
 
+            # If we are waiting for the user to repeat a translated phrase, gate the conversation here.
+            pending = session.get("translation_pending")
+            if pending and isinstance(pending, dict):
+                expected = pending.get("translation") or ""
+                if expected:
+                    # Always keep translation visible on screen
+                    yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
+
+                # If user said it (in target language), clear and continue with normal conversation
+                if likely_in_target_language(data.transcript, target_language) and await check_user_repeated_translation(
+                    user_text=data.transcript,
+                    target_language=target_language,
+                    expected=expected,
+                ):
+                    session["translation_pending"] = None
+                    yield f"data: {json.dumps({'type': 'translation_clear'})}\n\n"
+                    # Now proceed as normal with this user utterance as the next message in context
+                else:
+                    # Nudge again, don't progress the conversation
+                    spoken = translation_nudge(target_language)
+                    session["messages"].append({"role": "assistant", "content": spoken})
+                    yield f"data: {json.dumps({'text': spoken, 'done': False})}\n\n"
+                    yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': spoken, 'target_language': target_language})}\n\n"
+                    return
+
             # Translation assist is a momentary aid (no mode switch)
-            if detect_translation_intent(data.transcript, target_language):
+            if detect_translation_intent(data.transcript, target_language) or not likely_in_target_language(data.transcript, target_language):
                 try:
                     classified = await classify_translation_request(data.transcript, target_language, session)
                     payload = classified.get("payload") or ""
@@ -724,6 +749,12 @@ async def respond_to_user(data: UserMessage):
                         alternative=assist.get("alternative"),
                     )
                     if assist.get("translation"):
+                        # Persist until user repeats it in target language
+                        session["translation_pending"] = {
+                            "source": payload,
+                            "translation": assist["translation"],
+                            "alternative": assist.get("alternative"),
+                        }
                         yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
                 except Exception as e:
                     print(f"[TRANSLATION ASSIST] failed: {e}")
@@ -1107,6 +1138,75 @@ def detect_translation_intent(transcript: str, target_language: str) -> bool:
         return True
 
     return False
+
+def likely_in_target_language(text: str, target_language: str) -> bool:
+    """
+    Cheap heuristic gate:
+    - For Hindi/Chinese/Japanese/Korean: check script presence.
+    - For English: check looks_like_english.
+    - For other Latin languages: if it looks like English, assume NOT target; otherwise assume maybe target.
+    """
+    if not text:
+        return True
+    t = text.strip()
+
+    if target_language == "hi":
+        # Devanagari should be present for Hindi
+        return bool(re.search(r"[\u0900-\u097F]", t))
+    if target_language == "zh":
+        return bool(re.search(r"[\u4E00-\u9FFF]", t))
+    if target_language == "ja":
+        return bool(re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", t))
+    if target_language == "ko":
+        return bool(re.search(r"[\uAC00-\uD7AF]", t))
+    if target_language == "en":
+        return looks_like_english(t)
+
+    # Latin-script target languages (es/fr/de/nl/it/pt):
+    # Treat clear English as "not target"; otherwise allow.
+    if looks_like_english(t):
+        return False
+    return True
+
+async def check_user_repeated_translation(user_text: str, target_language: str, expected: str) -> bool:
+    """
+    Decide if the user said the translated phrase (roughly).
+    We allow small differences. No teaching, just a gate.
+    """
+    if not user_text or not expected:
+        return False
+
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You judge if a learner repeated a target phrase in {target_name}.\n"
+                        f"Return JSON only: {{\"said_it\": true/false}}.\n"
+                        f"Be lenient: allow minor word order, articles, small mistakes.\n"
+                        f"Require same core meaning.\n"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"expected": expected, "user": user_text},
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=40,
+            temperature=0.0,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        return bool(data.get("said_it"))
+    except Exception as e:
+        print(f"[TRANSLATION ASSIST] repeat check failed: {e}")
+        return False
 
 def extract_translation_payload(transcript: str) -> str:
     """

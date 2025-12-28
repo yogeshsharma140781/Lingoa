@@ -340,6 +340,10 @@ export function useApi() {
                 })
                 continue
               }
+              if (data.type === 'translation_clear') {
+                setCurrentTranslation(null)
+                continue
+              }
               if (data.text) {
                 appendAiMessage(data.text)
                 fullResponse += data.text
