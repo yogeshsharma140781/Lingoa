@@ -721,17 +721,21 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
                 # If user said it (in target language), clear and continue with normal conversation
+                # Extra safety: if we still deterministically detect mismatch, do NOT clear.
+                if force_translation_needed(data.transcript, target_language):
+                    said_it = False
                 # Extra safety: if the classifier still thinks this utterance needs translation,
                 # do NOT clear (user is still speaking in another language).
-                pending_classified = await classify_translation_request(data.transcript, target_language, session)
-                if pending_classified.get("needs_translation"):
-                    said_it = False
                 else:
-                    said_it = await check_user_repeated_translation(
-                        user_text=data.transcript,
-                        target_language=target_language,
-                        expected=expected,
-                    )
+                    pending_classified = await classify_translation_request(data.transcript, target_language, session)
+                    if pending_classified.get("needs_translation"):
+                        said_it = False
+                    else:
+                        said_it = await check_user_repeated_translation(
+                            user_text=data.transcript,
+                            target_language=target_language,
+                            expected=expected,
+                        )
                 print(f"[TRANSLATION PENDING] lang={target_language} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
                 if said_it:
                     session["translation_pending"] = None
@@ -747,7 +751,11 @@ async def respond_to_user(data: UserMessage):
 
             # Translation assist:
             # If user asks for help OR speaks in a different language than the target, show translation and wait.
-            classified = await classify_translation_request(data.transcript, target_language, session)
+            if force_translation_needed(data.transcript, target_language):
+                classified = {"needs_translation": True, "payload": data.transcript.strip()}
+            else:
+                classified = await classify_translation_request(data.transcript, target_language, session)
+
             if classified.get("needs_translation"):
                 try:
                     payload = classified.get("payload") or ""
@@ -1117,6 +1125,33 @@ def looks_like_english(text: str) -> bool:
         return True
     return False
 
+def force_translation_needed(transcript: str, target_language: str) -> bool:
+    """
+    Deterministic mismatch detector used to drive the "translation pending" UX.
+    If this returns True, we MUST enter translation assist and MUST NOT advance the conversation.
+    """
+    if not transcript:
+        return False
+    t = transcript.strip()
+    if not t:
+        return False
+
+    # If learning a non-English language and user clearly speaks English
+    if target_language != "en" and looks_like_english(t):
+        return True
+
+    # Script mismatches for non-Latin languages
+    if target_language == "hi" and not re.search(r"[\u0900-\u097F]", t):
+        return True
+    if target_language == "zh" and not re.search(r"[\u4E00-\u9FFF]", t):
+        return True
+    if target_language == "ja" and not re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", t):
+        return True
+    if target_language == "ko" and not re.search(r"[\uAC00-\uD7AF]", t):
+        return True
+
+    return False
+
 def detect_translation_intent(transcript: str, target_language: str) -> bool:
     """
     Soft detection:
@@ -1198,6 +1233,10 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
     if not user_text or not expected:
         return False
 
+    # If we deterministically detect mismatch, it cannot be a valid repeat.
+    if force_translation_needed(user_text, target_language):
+        return False
+
     def _tokenize_latin(s: str) -> list[str]:
         # Keep unicode letters (incl accents) + apostrophes; drop punctuation.
         tokens = re.findall(r"[^\W\d_']+(?:'[^\W\d_']+)?", s.lower(), flags=re.UNICODE)
@@ -1219,15 +1258,8 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
 
     # Deterministic guardrails: do NOT clear pending translation if the user is clearly not speaking
     # in the target language. This prevents the flow from progressing when the user keeps speaking English.
+    # (Kept for clarity, but force_translation_needed above already covers these.)
     if target_language != "en" and looks_like_english(user_text):
-        return False
-    if target_language == "hi" and not re.search(r"[\u0900-\u097F]", user_text):
-        return False
-    if target_language == "zh" and not re.search(r"[\u4E00-\u9FFF]", user_text):
-        return False
-    if target_language == "ja" and not re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", user_text):
-        return False
-    if target_language == "ko" and not re.search(r"[\uAC00-\uD7AF]", user_text):
         return False
 
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")
