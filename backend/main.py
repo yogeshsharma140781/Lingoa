@@ -1319,6 +1319,11 @@ async def classify_translation_request(transcript: str, target_language: str, se
     if not transcript:
         return {"needs_translation": False, "payload": ""}
 
+    # Deterministic fast-path: if user is clearly speaking English while learning a non-English language,
+    # treat it as translation assist (this is the most common real case).
+    if target_language != "en" and looks_like_english(transcript):
+        return {"needs_translation": True, "payload": transcript.strip()}
+
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")
     roleplay_id = session.get("roleplay_id")
     custom_scenario = session.get("custom_scenario")
@@ -1716,6 +1721,11 @@ async def analyze_speech(data: CorrectionRequest):
     print(f"[ANALYZE] Checking: {data.transcript}")
     
     try:
+        # If the user didn't speak in the target language (common during translation assist),
+        # don't treat it as a "correction" card (it confuses the flow).
+        if data.target_language != "en" and looks_like_english(data.transcript):
+            return {"has_correction": False}
+
         # Use GPT to analyze the speech
         response = await client.chat.completions.create(
             model="gpt-4o",
