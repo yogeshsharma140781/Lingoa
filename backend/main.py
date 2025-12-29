@@ -530,6 +530,8 @@ class UserMessage(BaseModel):
     session_id: str
     transcript: str
     is_partial: bool = False
+    # Client can echo a pending translation to make the flow resilient to stateless backends / instance changes
+    translation_pending: Optional[dict] = None
 
 class TextToSpeechRequest(BaseModel):
     text: str
@@ -704,6 +706,11 @@ async def respond_to_user(data: UserMessage):
             )
 
             target_language = session.get("target_language", "en")
+
+            # If the client includes a pending translation (e.g. across instance restarts),
+            # merge it into the session so we reliably gate.
+            if data.translation_pending and not session.get("translation_pending"):
+                session["translation_pending"] = data.translation_pending
 
             # If we are waiting for the user to repeat a translated phrase, gate the conversation here.
             pending = session.get("translation_pending")
