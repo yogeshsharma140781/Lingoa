@@ -714,11 +714,17 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
                 # If user said it (in target language), clear and continue with normal conversation
-                said_it = await check_user_repeated_translation(
-                    user_text=data.transcript,
-                    target_language=target_language,
-                    expected=expected,
-                )
+                # Extra safety: if the classifier still thinks this utterance needs translation,
+                # do NOT clear (user is still speaking in another language).
+                pending_classified = await classify_translation_request(data.transcript, target_language, session)
+                if pending_classified.get("needs_translation"):
+                    said_it = False
+                else:
+                    said_it = await check_user_repeated_translation(
+                        user_text=data.transcript,
+                        target_language=target_language,
+                        expected=expected,
+                    )
                 print(f"[TRANSLATION PENDING] lang={target_language} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
                 if said_it:
                     session["translation_pending"] = None
