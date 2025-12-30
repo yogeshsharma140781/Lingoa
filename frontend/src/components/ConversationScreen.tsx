@@ -268,7 +268,6 @@ export function ConversationScreen() {
         if (transcription?.text && transcription.text.trim()) {
           const transcript = transcription.text
           setUserTranscript(transcript)
-          clearAiMessage()
           clearCorrection() // Clear any previous correction
           
           // Analyze speech for corrections only when the user is already speaking the target language.
@@ -284,6 +283,10 @@ export function ConversationScreen() {
           
           // Minimal delay to show transcript (reduced from 600ms)
           await new Promise(r => setTimeout(r, 200))
+
+          // Clear right before we start streaming the next AI response, so the
+          // previous AI question stays visible while the user is speaking.
+          clearAiMessage()
           
           const response = await getAiResponse(transcript, transcription?.detectedLanguage ?? null)
           
@@ -759,18 +762,20 @@ export function ConversationScreen() {
             </motion.div>
           )}
 
-          {/* AI speaking */}
-          {isAiSpeaking && (
+          {/* Last AI text (keep visible even during user's turn) */}
+          {aiMessage && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
             >
               <div className="flex items-center justify-center gap-2 mb-2">
-                <Volume2 className="w-5 h-5 text-accent-400" />
-                <span className="text-accent-400 font-medium">AI is speaking</span>
+                <Volume2 className={`w-5 h-5 ${isAiSpeaking ? 'text-accent-400' : 'text-surface-400'}`} />
+                <span className={`${isAiSpeaking ? 'text-accent-400' : 'text-surface-400'} font-medium`}>
+                  {isAiSpeaking ? 'AI is speaking' : 'AI asked'}
+                </span>
               </div>
               <p className="text-surface-300 text-lg max-w-xs">
-                {aiMessage || '...'}
+                {aiMessage}
               </p>
             </motion.div>
           )}
