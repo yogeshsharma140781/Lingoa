@@ -1638,17 +1638,18 @@ async def ensure_translation_only(payload: str, target_language: str, translatio
 def translation_nudge(language: str) -> str:
     """Short spoken guidance (TTS) when translation assist is shown on-screen."""
     nudges = {
-        "hi": "ऐसे कह सकते हो। स्क्रीन पर देखो… अब तुम बोलो।",
-        "es": "Así puedes decirlo. Mira la pantalla… y ahora tú.",
-        "fr": "Tu peux dire ça. Regarde l’écran… à toi.",
-        "de": "So kannst du’s sagen. Schau kurz auf den Bildschirm… und jetzt du.",
-        "nl": "Zo kun je het zeggen. Kijk even op het scherm… en nu jij.",
-        "it": "Puoi dirlo così. Guarda lo schermo… e ora tu.",
-        "pt": "Você pode dizer assim. Olha a tela… e agora você.",
-        "zh": "可以这样说。看一下屏幕…现在你说。",
-        "ja": "こう言えるよ。画面を見て…じゃあ言ってみて。",
-        "ko": "이렇게 말하면 돼. 화면 보고… 이제 네가 말해.",
-        "en": "You can say it like this. Look at the screen… and now you.",
+        # Keep this extremely short — it's spoken frequently during the "repeat" loop.
+        "hi": "फिर से।",
+        "es": "Otra vez.",
+        "fr": "Encore.",
+        "de": "Nochmal.",
+        "nl": "Nog eens.",
+        "it": "Ancora.",
+        "pt": "De novo.",
+        "zh": "再说一遍。",
+        "ja": "もう一度。",
+        "ko": "한 번 더.",
+        "en": "Try again.",
     }
     return nudges.get(language, nudges["en"])
 
