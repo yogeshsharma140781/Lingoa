@@ -728,16 +728,16 @@ async def respond_to_user(data: UserMessage):
                     # Always keep translation visible on screen
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
-                # If user said it (in target language), clear and continue with normal conversation
-                # Extra safety: if we still deterministically detect mismatch, do NOT clear.
-                if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
-                    said_it = False
-                # Extra safety: if the classifier still thinks this utterance needs translation,
-                # do NOT clear (user is still speaking in another language).
+                # Clear rule (per product requirement):
+                # If Whisper detected the user's utterance is in the target language,
+                # we immediately proceed (do NOT require a perfect repeat).
+                if detected_lang and detected_lang == target_language:
+                    said_it = True
                 else:
-                    pending_classified = await classify_translation_request(data.transcript, target_language, session)
-                    if pending_classified.get("needs_translation"):
+                    # If we still deterministically detect mismatch, do NOT clear.
+                    if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
                         said_it = False
+                    # Otherwise fall back to a best-effort repeat check (covers cases where detected_lang is missing)
                     else:
                         said_it = await check_user_repeated_translation(
                             user_text=data.transcript,
