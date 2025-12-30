@@ -1096,6 +1096,7 @@ def enforce_hindi_female_self_reference(text: str) -> str:
 # We use a *high-precision* English word set to avoid false positives for Dutch/German/etc.
 # (Words like "in/is/to" occur across languages and are NOT reliable.)
 _EN_HIGH_PRECISION_WORDS = {
+    # High-signal English function words / pronouns
     "the", "and", "you", "your", "yours",
     "i", "me", "my", "mine",
     "are", "was", "were",
@@ -1103,6 +1104,8 @@ _EN_HIGH_PRECISION_WORDS = {
     "what", "how", "why", "when", "where", "who",
     "can", "could", "would", "should",
     "please", "sorry", "thanks", "thank",
+    # Common English negatives / fillers that show up in mixed utterances
+    "no", "not", "dont", "can't", "cant", "won't", "wont", "didn't", "didnt",
 }
 
 def looks_like_english(text: str) -> bool:
@@ -1117,8 +1120,10 @@ def looks_like_english(text: str) -> bool:
     if not tokens:
         return False
     hits = sum(1 for t in tokens if t in _EN_HIGH_PRECISION_WORDS)
+    # Extra signal: English negation contraction (often present in mixed utterances)
+    has_nt = "n't" in lower or "dont" in tokens or "didnt" in tokens or "wont" in tokens or "cant" in tokens
     # For short replies (role-play), even 2 strong English tokens is enough.
-    if hits >= 2:
+    if hits >= 2 or (hits >= 1 and has_nt):
         return True
     # For slightly longer replies, use a ratio.
     if len(tokens) >= 6 and hits / len(tokens) >= 0.25:
@@ -1753,9 +1758,9 @@ async def analyze_speech(data: CorrectionRequest):
     print(f"[ANALYZE] Checking: {data.transcript}")
     
     try:
-        # If the user didn't speak in the target language (common during translation assist),
+        # If the user didn't speak in the target language (translation assist case),
         # don't treat it as a "correction" card (it confuses the flow).
-        if data.target_language != "en" and looks_like_english(data.transcript):
+        if force_translation_needed(data.transcript, data.target_language):
             return {"has_correction": False}
 
         # Use GPT to analyze the speech
