@@ -277,13 +277,17 @@ export function useApi() {
     return null
   }, [sessionId, setUserStats, setImprovements, setIsAiSpeaking])
 
-  // Transcribe audio with language hint
-  const transcribeAudio = useCallback(async (audioBlob: Blob): Promise<{ text: string; detectedLanguage?: string | null } | null> => {
+  // Transcribe audio (auto-detect by default; optional hint for "repeat in target language" step)
+  const transcribeAudio = useCallback(async (
+    audioBlob: Blob,
+    languageHint?: string | null
+  ): Promise<{ text: string; detectedLanguage?: string | null } | null> => {
     try {
       const formData = new FormData()
       formData.append('audio', audioBlob, 'audio.webm')
 
-      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}`, {
+      const hintParam = languageHint ? `&hint=${encodeURIComponent(languageHint)}` : ''
+      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}`, {
         method: 'POST',
         body: formData,
       })

@@ -659,7 +659,8 @@ async def get_user_stats(user_id: str):
 @app.post("/api/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
-    language: str = "es"
+    language: str = "es",
+    hint: Optional[str] = None
 ):
     """Transcribe audio using Whisper with language hint"""
     try:
@@ -681,21 +682,26 @@ async def transcribe_audio(
         }
         
         whisper_lang = whisper_lang_map.get(language, "en")
+        hint_code = normalize_lang_code(hint)
+        use_hint = bool(hint_code) and is_supported_language_code(hint_code)
         
-        # Use OpenAI Whisper with AUTO language detection.
-        # Passing a language hint here can force English speech to be mis-transcribed into the target language,
-        # which breaks translation-assist gating.
-        transcript = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=("audio.webm", audio_data, "audio/webm"),
-            response_format="verbose_json",
-        )
+        # Use Whisper auto-detect by default.
+        # When the user is in the "repeat the target sentence" step, we pass hint=<target_language>
+        # to prevent mis-detections like Arabic for Dutch pronunciation.
+        kwargs = {
+            "model": "whisper-1",
+            "file": ("audio.webm", audio_data, "audio/webm"),
+            "response_format": "verbose_json",
+        }
+        if use_hint:
+            kwargs["language"] = hint_code
+        transcript = await client.audio.transcriptions.create(**kwargs)
         
         # verbose_json includes language + text
         text = (getattr(transcript, "text", None) or "").strip()
         detected = getattr(transcript, "language", None)
         
-        return {"transcript": text, "detected_language": detected}
+        return {"transcript": text, "detected_language": detected, "used_hint": hint_code if use_hint else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
