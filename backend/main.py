@@ -677,15 +677,20 @@ async def transcribe_audio(
         
         whisper_lang = whisper_lang_map.get(language, "en")
         
-        # Use OpenAI Whisper with language hint
+        # Use OpenAI Whisper with AUTO language detection.
+        # Passing a language hint here can force English speech to be mis-transcribed into the target language,
+        # which breaks translation-assist gating.
         transcript = await client.audio.transcriptions.create(
             model="whisper-1",
             file=("audio.webm", audio_data, "audio/webm"),
-            response_format="text",
-            language=whisper_lang  # Tell Whisper what language to expect
+            response_format="verbose_json",
         )
         
-        return {"transcript": transcript.strip()}
+        # verbose_json includes language + text
+        text = (getattr(transcript, "text", None) or "").strip()
+        detected = getattr(transcript, "language", None)
+        
+        return {"transcript": text, "detected_language": detected}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

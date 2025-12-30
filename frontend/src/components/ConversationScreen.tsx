@@ -261,9 +261,10 @@ export function ConversationScreen() {
     
     if (blob && blob.size > 0) {
       try {
-        const transcript = await transcribeAudio(blob)
+        const transcription = await transcribeAudio(blob)
         
-        if (transcript && transcript.trim()) {
+        if (transcription?.text && transcription.text.trim()) {
+          const transcript = transcription.text
           setUserTranscript(transcript)
           clearAiMessage()
           clearCorrection() // Clear any previous correction

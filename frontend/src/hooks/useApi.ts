@@ -278,7 +278,7 @@ export function useApi() {
   }, [sessionId, setUserStats, setImprovements, setIsAiSpeaking])
 
   // Transcribe audio with language hint
-  const transcribeAudio = useCallback(async (audioBlob: Blob): Promise<string | null> => {
+  const transcribeAudio = useCallback(async (audioBlob: Blob): Promise<{ text: string; detectedLanguage?: string | null } | null> => {
     try {
       const formData = new FormData()
       formData.append('audio', audioBlob, 'audio.webm')
@@ -290,7 +290,7 @@ export function useApi() {
 
       if (res.ok) {
         const data = await res.json()
-        return data.transcript
+        return { text: data.transcript, detectedLanguage: data.detected_language }
       }
     } catch (err) {
       console.error('Transcription error:', err)
