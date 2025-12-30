@@ -666,42 +666,58 @@ async def transcribe_audio(
     try:
         audio_data = await audio.read()
         
-        # Map language codes to Whisper language codes
-        whisper_lang_map = {
-            "es": "es",  # Spanish
-            "fr": "fr",  # French
-            "de": "de",  # German
-            "nl": "nl",  # Dutch
-            "it": "it",  # Italian
-            "pt": "pt",  # Portuguese
-            "hi": "hi",  # Hindi
-            "zh": "zh",  # Chinese
-            "ja": "ja",  # Japanese
-            "ko": "ko",  # Korean
-            "en": "en",  # English
-        }
-        
-        whisper_lang = whisper_lang_map.get(language, "en")
         hint_code = normalize_lang_code(hint)
         use_hint = bool(hint_code) and is_supported_language_code(hint_code)
+
+        # Heuristic: if we *hinted* a Latin-script language (nl/fr/de/etc) but Whisper returns
+        # a clearly non‑Latin script (e.g. Devanagari), retry once without a hint.
+        # This prevents rare cases where the user's utterance is shown in the wrong script.
+        def _has_devanagari(s: str) -> bool:
+            return bool(re.search(r"[\u0900-\u097F]", s or ""))
+
+        def _has_arabic(s: str) -> bool:
+            return bool(re.search(r"[\u0600-\u06FF]", s or ""))
+
+        def _has_cjk(s: str) -> bool:
+            return bool(re.search(r"[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]", s or ""))
+
+        def _looks_like_wrong_script_for_latin(s: str) -> bool:
+            # Only trigger on meaningful text; avoid retries on empty/very short clips.
+            if not s:
+                return False
+            s2 = s.strip()
+            if len(s2) < 6:
+                return False
+            return _has_devanagari(s2) or _has_arabic(s2) or _has_cjk(s2)
+
+        latin_langs = {"en", "es", "fr", "de", "nl", "it", "pt"}
         
         # Use Whisper auto-detect by default.
         # When the user is in the "repeat the target sentence" step, we pass hint=<target_language>
         # to prevent mis-detections like Arabic for Dutch pronunciation.
-        kwargs = {
-            "model": "whisper-1",
-            "file": ("audio.webm", audio_data, "audio/webm"),
-            "response_format": "verbose_json",
-        }
-        if use_hint:
-            kwargs["language"] = hint_code
-        transcript = await client.audio.transcriptions.create(**kwargs)
+        async def _transcribe_once(language_hint: Optional[str]) -> tuple[str, Optional[str], Optional[str]]:
+            kwargs = {
+                "model": "whisper-1",
+                "file": ("audio.webm", audio_data, "audio/webm"),
+                "response_format": "verbose_json",
+            }
+            if language_hint:
+                kwargs["language"] = language_hint
+            t = await client.audio.transcriptions.create(**kwargs)
+            text_out = (getattr(t, "text", None) or "").strip()
+            detected_out = getattr(t, "language", None)
+            used_hint_out = language_hint
+            return text_out, detected_out, used_hint_out
+
+        text, detected, used_hint = await _transcribe_once(hint_code if use_hint else None)
+        if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
+            # Retry with auto-detect; keep whichever looks less wrong.
+            text2, detected2, used_hint2 = await _transcribe_once(None)
+            if text2 and not _looks_like_wrong_script_for_latin(text2):
+                text, detected, used_hint = text2, detected2, used_hint2
         
         # verbose_json includes language + text
-        text = (getattr(transcript, "text", None) or "").strip()
-        detected = getattr(transcript, "language", None)
-        
-        return {"transcript": text, "detected_language": detected, "used_hint": hint_code if use_hint else None}
+        return {"transcript": text, "detected_language": detected, "used_hint": used_hint}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
