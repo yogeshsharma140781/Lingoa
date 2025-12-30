@@ -714,6 +714,7 @@ async def respond_to_user(data: UserMessage):
 
             target_language = session.get("target_language", "en")
             detected_lang = normalize_lang_code(data.detected_language)
+            print(f"[RESPOND] detected_language_raw={data.detected_language!r} detected_language_norm={detected_lang!r} target_language={target_language!r} transcript={data.transcript!r}")
 
             # If the client includes a pending translation (e.g. across instance restarts),
             # merge it into the session so we reliably gate.
@@ -729,21 +730,35 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
                 # Clear rule (per product requirement):
-                # If Whisper detected the user's utterance is in the target language,
-                # we immediately proceed (do NOT require a perfect repeat).
+                # - If Whisper detected the user's utterance is in the target language => proceed.
+                # - If detected language is missing or unreliable, use a conservative fallback:
+                #   clear only when the utterance clearly appears to be in the target language.
                 if detected_lang and detected_lang == target_language:
                     said_it = True
                 else:
-                    # If we still deterministically detect mismatch, do NOT clear.
+                    # If we deterministically detect mismatch, do NOT clear.
                     if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
                         said_it = False
-                    # Otherwise fall back to a best-effort repeat check (covers cases where detected_lang is missing)
                     else:
-                        said_it = await check_user_repeated_translation(
-                            user_text=data.transcript,
-                            target_language=target_language,
-                            expected=expected,
-                        )
+                        # Fallback: allow proceed when utterance doesn't look like English (for Latin targets),
+                        # or has the correct script (for non-Latin targets).
+                        if target_language in {"es", "fr", "de", "nl", "it", "pt"}:
+                            said_it = not looks_like_english(data.transcript)
+                        elif target_language == "hi":
+                            said_it = bool(re.search(r"[\u0900-\u097F]", data.transcript))
+                        elif target_language == "zh":
+                            said_it = bool(re.search(r"[\u4E00-\u9FFF]", data.transcript))
+                        elif target_language == "ja":
+                            said_it = bool(re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", data.transcript))
+                        elif target_language == "ko":
+                            said_it = bool(re.search(r"[\uAC00-\uD7AF]", data.transcript))
+                        else:
+                            # As a safe default, require the best-effort repeat check.
+                            said_it = await check_user_repeated_translation(
+                                user_text=data.transcript,
+                                target_language=target_language,
+                                expected=expected,
+                            )
                 print(f"[TRANSLATION PENDING] lang={target_language} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
                 if said_it:
                     session["translation_pending"] = None
