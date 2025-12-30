@@ -299,7 +299,7 @@ export function useApi() {
   }, [targetLanguage])
 
   // Get AI response (streaming)
-  const getAiResponse = useCallback(async (transcript: string): Promise<string | null> => {
+  const getAiResponse = useCallback(async (transcript: string, detectedLanguage?: string | null): Promise<string | null> => {
     if (!sessionId) return null
 
     try {
@@ -317,6 +317,7 @@ export function useApi() {
                 alternative: currentTranslation.alternative ?? null,
               }
             : null,
+          detected_language: detectedLanguage ?? null,
         }),
       })
 

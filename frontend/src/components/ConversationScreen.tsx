@@ -283,7 +283,7 @@ export function ConversationScreen() {
           // Minimal delay to show transcript (reduced from 600ms)
           await new Promise(r => setTimeout(r, 200))
           
-          const response = await getAiResponse(transcript)
+          const response = await getAiResponse(transcript, transcription?.detectedLanguage ?? null)
           
           if (response) {
             setUserTranscript('')

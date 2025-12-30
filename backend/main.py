@@ -532,6 +532,8 @@ class UserMessage(BaseModel):
     is_partial: bool = False
     # Client can echo a pending translation to make the flow resilient to stateless backends / instance changes
     translation_pending: Optional[dict] = None
+    # Whisper-detected language for the user's utterance (from /api/transcribe verbose_json)
+    detected_language: Optional[str] = None
 
 class TextToSpeechRequest(BaseModel):
     text: str
@@ -711,6 +713,7 @@ async def respond_to_user(data: UserMessage):
             )
 
             target_language = session.get("target_language", "en")
+            detected_lang = normalize_lang_code(data.detected_language)
 
             # If the client includes a pending translation (e.g. across instance restarts),
             # merge it into the session so we reliably gate.
@@ -727,7 +730,7 @@ async def respond_to_user(data: UserMessage):
 
                 # If user said it (in target language), clear and continue with normal conversation
                 # Extra safety: if we still deterministically detect mismatch, do NOT clear.
-                if force_translation_needed(data.transcript, target_language):
+                if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
                     said_it = False
                 # Extra safety: if the classifier still thinks this utterance needs translation,
                 # do NOT clear (user is still speaking in another language).
@@ -756,7 +759,7 @@ async def respond_to_user(data: UserMessage):
 
             # Translation assist:
             # If user asks for help OR speaks in a different language than the target, show translation and wait.
-            if force_translation_needed(data.transcript, target_language):
+            if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
                 classified = {"needs_translation": True, "payload": data.transcript.strip()}
             else:
                 classified = await classify_translation_request(data.transcript, target_language, session)
@@ -1162,6 +1165,34 @@ def force_translation_needed(transcript: str, target_language: str) -> bool:
         return True
 
     return False
+
+def normalize_lang_code(code: Optional[str]) -> Optional[str]:
+    """Normalize Whisper language outputs (sometimes 'en', sometimes 'english')."""
+    if not code:
+        return None
+    c = str(code).strip().lower()
+    if not c:
+        return None
+    # Common Whisper verbose_json language values are ISO-639-1, but be defensive.
+    mapping = {
+        "english": "en",
+        "dutch": "nl",
+        "spanish": "es",
+        "french": "fr",
+        "german": "de",
+        "italian": "it",
+        "portuguese": "pt",
+        "hindi": "hi",
+        "chinese": "zh",
+        "japanese": "ja",
+        "korean": "ko",
+    }
+    if c in mapping:
+        return mapping[c]
+    # If already looks like a code, keep first two letters
+    if len(c) >= 2:
+        return c[:2]
+    return c
 
 def detect_translation_intent(transcript: str, target_language: str) -> bool:
     """
