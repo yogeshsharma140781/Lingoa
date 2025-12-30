@@ -44,6 +44,9 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Build/version info (useful for debugging deploys)
 APP_BUILD_TAG = "translation-pending-gate-v3"
 
+# Supported language codes used in the app
+SUPPORTED_LANGUAGE_CODES = {"en", "es", "fr", "de", "nl", "it", "pt", "hi", "zh", "ja", "ko"}
+
 # In-memory storage (replace with DB in production)
 sessions = {}
 user_streaks = {}
@@ -714,7 +717,12 @@ async def respond_to_user(data: UserMessage):
 
             target_language = session.get("target_language", "en")
             detected_lang = normalize_lang_code(data.detected_language)
-            print(f"[RESPOND] detected_language_raw={data.detected_language!r} detected_language_norm={detected_lang!r} target_language={target_language!r} transcript={data.transcript!r}")
+            detected_is_supported = is_supported_language_code(detected_lang)
+            print(
+                f"[RESPOND] detected_language_raw={data.detected_language!r} "
+                f"detected_language_norm={detected_lang!r} supported={detected_is_supported} "
+                f"target_language={target_language!r} transcript={data.transcript!r}"
+            )
 
             # If the client includes a pending translation (e.g. across instance restarts),
             # merge it into the session so we reliably gate.
@@ -733,11 +741,12 @@ async def respond_to_user(data: UserMessage):
                 # - If Whisper detected the user's utterance is in the target language => proceed.
                 # - If detected language is missing or unreliable, use a conservative fallback:
                 #   clear only when the utterance clearly appears to be in the target language.
-                if detected_lang and detected_lang == target_language:
+                if detected_is_supported and detected_lang == target_language:
                     said_it = True
                 else:
                     # If we deterministically detect mismatch, do NOT clear.
-                    if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
+                    # Only trust detected_language mismatch if it's one of our supported codes.
+                    if (detected_is_supported and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
                         said_it = False
                     else:
                         # Fallback: allow proceed when utterance doesn't look like English (for Latin targets),
@@ -774,7 +783,8 @@ async def respond_to_user(data: UserMessage):
 
             # Translation assist:
             # If user asks for help OR speaks in a different language than the target, show translation and wait.
-            if (detected_lang and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
+            # Only trust detected_language mismatch if it's one of our supported codes.
+            if (detected_is_supported and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
                 classified = {"needs_translation": True, "payload": data.transcript.strip()}
             else:
                 classified = await classify_translation_request(data.transcript, target_language, session)
@@ -798,6 +808,12 @@ async def respond_to_user(data: UserMessage):
                         translation=assist.get("translation", ""),
                         alternative=assist.get("alternative"),
                     )
+                    # Final hard enforcement: translation text must be in the target language.
+                    # This prevents weird cases where the model outputs Arabic (or other) despite instructions.
+                    if assist.get("translation"):
+                        assist["translation"] = await ensure_target_language(assist["translation"], target_language)
+                    if assist.get("alternative"):
+                        assist["alternative"] = await ensure_target_language(assist["alternative"], target_language)
                     if assist.get("translation"):
                         # Persist until user repeats it in target language
                         session["translation_pending"] = {
@@ -1208,6 +1224,9 @@ def normalize_lang_code(code: Optional[str]) -> Optional[str]:
     if len(c) >= 2:
         return c[:2]
     return c
+
+def is_supported_language_code(code: Optional[str]) -> bool:
+    return bool(code) and code in SUPPORTED_LANGUAGE_CODES
 
 def detect_translation_intent(transcript: str, target_language: str) -> bool:
     """
