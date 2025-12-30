@@ -1279,6 +1279,25 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
     if force_translation_needed(user_text, target_language):
         return False
 
+    # Fast deterministic accept for Latin-script targets when the user is very close to the expected phrase.
+    # This prevents "stuck repeating forever" when Whisper has tiny differences.
+    if target_language in {"es", "fr", "de", "nl", "it", "pt"}:
+        from difflib import SequenceMatcher
+
+        def _norm(s: str) -> str:
+            s = s.lower()
+            s = re.sub(r"[^a-zà-ž' ]+", " ", s, flags=re.IGNORECASE)
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+
+        nu = _norm(user_text)
+        ne = _norm(expected)
+        if nu and ne:
+            ratio = SequenceMatcher(None, nu, ne).ratio()
+            # For short phrases, be more lenient
+            if ratio >= (0.78 if len(ne) >= 18 else 0.70):
+                return True
+
     def _tokenize_latin(s: str) -> list[str]:
         # Keep unicode letters (incl accents) + apostrophes; drop punctuation.
         tokens = re.findall(r"[^\W\d_']+(?:'[^\W\d_']+)?", s.lower(), flags=re.UNICODE)
@@ -1294,8 +1313,9 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
         # If expected is too short, skip this check.
         if e:
             overlap = len(u & e)
-            # Require at least 2 shared content tokens.
-            if overlap < 2:
+            # For short expected phrases, require at least 1 shared content token; otherwise 2.
+            min_overlap = 1 if len(e) <= 3 else 2
+            if overlap < min_overlap:
                 return False
 
     # Deterministic guardrails: do NOT clear pending translation if the user is clearly not speaking
