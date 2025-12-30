@@ -46,6 +46,8 @@ export function ConversationScreen() {
     analyzeUserSpeech,
     clearCorrection,
   } = useApi()
+
+  const targetLanguage = useStore((s) => s.targetLanguage)
   
   const [isInitialized, setIsInitialized] = useState(false)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
@@ -266,8 +268,13 @@ export function ConversationScreen() {
           clearAiMessage()
           clearCorrection() // Clear any previous correction
           
-          // Analyze speech for corrections (runs in parallel with AI response)
-          analyzeUserSpeech(transcript)
+          // Analyze speech for corrections only when the user is already speaking the target language.
+          // If they're speaking English while learning Dutch (etc), we want translation-assist to take over,
+          // and we should not show a "correction" card that looks like a translation.
+          const looksEnglish = /\b(i|you|we|they|my|your|dont|don't|didn't|cant|can't|won't|wont|not)\b/i.test(transcript)
+          if (!(targetLanguage !== 'en' && looksEnglish)) {
+            analyzeUserSpeech(transcript)
+          }
           
           // Play filler NOW - while AI is thinking (30% chance)
           playThinkingFiller()

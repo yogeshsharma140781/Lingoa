@@ -782,6 +782,7 @@ async def respond_to_user(data: UserMessage):
                             "translation": assist["translation"],
                             "alternative": assist.get("alternative"),
                         }
+                        print(f"[TRANSLATION ASSIST] set pending lang={target_language} source={payload!r} translation={assist['translation'][:80]!r}")
                         yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
                 except Exception as e:
                     print(f"[TRANSLATION ASSIST] failed: {e}")
