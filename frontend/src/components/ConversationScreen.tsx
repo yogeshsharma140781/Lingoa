@@ -7,6 +7,7 @@ import { useApi, unlockAudio } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { CorrectionCard } from './CorrectionCard'
 import { TranslationCard } from './TranslationCard'
+import { YouMeantCard } from './YouMeantCard'
 
 // Speed options (UI labels - actual speed is mapped in useApi)
 const SPEED_OPTIONS = [0.8, 0.9, 1.0]
@@ -32,6 +33,8 @@ export function ConversationScreen() {
     setIsProcessing,
     currentCorrection,
     currentTranslation,
+    currentYouMeant,
+    setCurrentYouMeant,
     audioSilentMode,
     setAudioSilentMode,
   } = useStore()
@@ -249,6 +252,7 @@ export function ConversationScreen() {
     setIsWaitingForUser(false)
     setIsProcessing(true)
     setUserTranscript('Transcribing...')
+    setCurrentYouMeant(null)
     
     // Stop recording to get final audio
     stopRecording()
@@ -743,6 +747,16 @@ export function ConversationScreen() {
               className="mb-4 w-full max-w-sm"
             >
               <TranslationCard translation={currentTranslation} />
+            </motion.div>
+          )}
+
+          {currentYouMeant && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 w-full max-w-sm"
+            >
+              <YouMeantCard text={currentYouMeant} />
             </motion.div>
           )}
 

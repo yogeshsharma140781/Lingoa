@@ -124,6 +124,10 @@ interface AppState {
   currentTranslation: TranslationAssist | null
   setCurrentTranslation: (translation: TranslationAssist | null) => void
 
+  // Visual-only intent hint ("You meant:")
+  currentYouMeant: string | null
+  setCurrentYouMeant: (text: string | null) => void
+
   // Microphone
   micPermission: 'prompt' | 'granted' | 'denied'
   setMicPermission: (status: 'prompt' | 'granted' | 'denied') => void
@@ -227,6 +231,10 @@ export const useStore = create<AppState>((set) => ({
   currentTranslation: null,
   setCurrentTranslation: (translation) => set({ currentTranslation: translation }),
 
+  // Visual-only intent hint
+  currentYouMeant: null,
+  setCurrentYouMeant: (text) => set({ currentYouMeant: text }),
+
   // Microphone
   micPermission: 'prompt',
   setMicPermission: (status) => set({ micPermission: status }),
@@ -247,6 +255,7 @@ export const useStore = create<AppState>((set) => ({
     improvements: [],
     currentCorrection: null,
     currentTranslation: null,
+    currentYouMeant: null,
     selectedTopic: null,
     selectedRoleplayId: null,
     customScenario: null,

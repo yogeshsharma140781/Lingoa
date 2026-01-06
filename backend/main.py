@@ -268,6 +268,14 @@ CRITICAL RULES:
   - सिर्फ हिंदी में बोलो (देवनागरी)
   - English कभी मत बोलो
 
+LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
+- User language learner है; pronunciation गलत हो सकती है।
+- Speech transcription में errors हो सकते हैं।
+- Intent generously infer करो; words पे अटकना नहीं।
+- User ने जानबूझकर weird बात नहीं कही — assume best.
+- अगर transcript गलत लगे, उसे verbatim repeat मत करो; intended meaning पे respond करो।
+- अगर सच में ambiguity हो, तो soft yes/no confirmation पूछो (never “समझ नहीं आया”).
+
 START IMMEDIATELY IN CHARACTER - no setup, no explanation."""
         else:
             target_language_name = LANGUAGE_NAMES.get(language, "the target language")
@@ -285,6 +293,14 @@ CRITICAL RULES:
 - LANGUAGE REQUIREMENT - CRITICAL:
   - Speak ONLY in {target_language_name} ({language})
   - NEVER switch languages, even if user mixes languages
+
+LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
+- The user is a language learner. Their pronunciation may be inaccurate.
+- Speech transcription may contain errors.
+- Infer intent generously. Prefer meaningful interpretation over literal words.
+- Never assume the user said something strange on purpose.
+- If the transcript looks wrong, do NOT repeat it verbatim; respond to intended meaning.
+- If genuinely ambiguous, ask a soft yes/no confirmation in the target language (never “I didn’t understand”).
 
 START IMMEDIATELY IN CHARACTER - no setup, no explanation."""
     
@@ -313,6 +329,14 @@ CRITICAL RULES:
   - सिर्फ हिंदी में बोलो (देवनागरी)
   - English कभी मत बोलो
 
+LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
+- User language learner है; pronunciation गलत हो सकती है।
+- Speech transcription में errors हो सकते हैं।
+- Intent generously infer करो; words पे अटकना नहीं।
+- User ने जानबूझकर weird बात नहीं कही — assume best.
+- अगर transcript गलत लगे, उसे verbatim repeat मत करो; intended meaning पे respond करो।
+- अगर सच में ambiguity हो, तो soft yes/no confirmation पूछो (never “समझ नहीं आया”).
+
 START IMMEDIATELY - no setup."""
     else:
         target_language_name = LANGUAGE_NAMES.get(language, "the target language")
@@ -330,6 +354,14 @@ CRITICAL RULES:
 - LANGUAGE REQUIREMENT - CRITICAL:
   - Speak ONLY in {target_language_name} ({language})
   - NEVER switch languages, even if user mixes languages
+
+LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
+- The user is a language learner. Their pronunciation may be inaccurate.
+- Speech transcription may contain errors.
+- Infer intent generously. Prefer meaningful interpretation over literal words.
+- Never assume the user said something strange on purpose.
+- If the transcript looks wrong, do NOT repeat it verbatim; respond to intended meaning.
+- If genuinely ambiguous, ask a soft yes/no confirmation in the target language (never “I didn’t understand”).
 
 START IMMEDIATELY - no setup."""
 
@@ -387,6 +419,15 @@ PERSONA (CONSISTENCY RULE):
 - You are a woman.
 - Never refer to yourself as male.
 
+LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
+- The user is a language learner. Their pronunciation may be inaccurate.
+- Speech transcription may contain errors.
+- Infer intent generously. Prefer meaningful interpretation over literal words.
+- Never assume the user said something strange on purpose.
+- Do NOT punish, shame, or expose mistakes.
+- Avoid repeating the user's incorrect transcript verbatim if it looks wrong; respond to intended meaning.
+- If genuinely ambiguous, ask a soft yes/no confirmation in the target language (never say “I didn’t understand”).
+
 SPEAKING STYLE - YOU ARE TALKING, NOT WRITING:
 - Speak like a real friend, NOT a teacher or narrator
 - Use SHORT sentences (max 10-12 words each)
@@ -436,6 +477,15 @@ STYLE - ये सबसे ज़रूरी है:
 - Drop words जैसे लोग असली बातचीत में करते हैं
 - Teacher या news anchor की तरह मत बोलो
 - एक friendly Indian person की तरह बोलो
+
+LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
+- User language learner है; pronunciation गलत हो सकती है।
+- Speech transcription में errors हो सकते हैं।
+- Intent generously infer करो; words पे अटकना नहीं।
+- User ने जानबूझकर weird बात नहीं कही — assume best.
+- User को शर्मिंदा/पकड़ने वाली correction मत करो।
+- अगर transcript गलत लगे, उसे verbatim repeat मत करो; intended meaning पे respond करो।
+- अगर सच में ambiguity हो, तो soft yes/no confirmation पूछो (कभी मत बोलो “समझ नहीं आया”).
 
 RESPONSE FORMAT:
 - Fillers (अच्छा, हम्म, तो) से शुरू मत करो - वो separately add होते हैं
@@ -755,6 +805,9 @@ async def respond_to_user(data: UserMessage):
             pending = session.get("translation_pending")
             if pending and isinstance(pending, dict):
                 expected = pending.get("translation") or ""
+                # Track attempts to avoid trapping beginners in a loop.
+                attempts = int(pending.get("attempts") or 0) + 1
+                pending["attempts"] = attempts
                 if expected:
                     # Always keep translation visible on screen
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
@@ -764,7 +817,15 @@ async def respond_to_user(data: UserMessage):
                 # - If detected language is missing or unreliable, use a conservative fallback:
                 #   clear only when the utterance clearly appears to be in the target language.
                 if detected_is_supported and detected_lang == target_language:
-                    said_it = True
+                    # Prefer a near-match check, but don't trap the user forever.
+                    # After a couple attempts, accept if they're speaking the target language.
+                    said_it = await check_user_repeated_translation(
+                        user_text=data.transcript,
+                        target_language=target_language,
+                        expected=expected,
+                    )
+                    if not said_it and attempts >= 3 and likely_in_target_language(data.transcript, target_language):
+                        said_it = True
                 else:
                     # If we deterministically detect mismatch, do NOT clear.
                     # Only trust detected_language mismatch if it's one of our supported codes.
@@ -790,7 +851,7 @@ async def respond_to_user(data: UserMessage):
                                 target_language=target_language,
                                 expected=expected,
                             )
-                print(f"[TRANSLATION PENDING] lang={target_language} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
+                print(f"[TRANSLATION PENDING] lang={target_language} attempts={attempts} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
                 if said_it:
                     session["translation_pending"] = None
                     yield f"data: {json.dumps({'type': 'translation_clear'})}\n\n"
@@ -856,8 +917,39 @@ async def respond_to_user(data: UserMessage):
                 return
 
             # Normal conversation: add user message to context
-            session["messages"].append({"role": "user", "content": data.transcript})
-            session["user_utterances"].append(data.transcript)
+            raw_transcript = (data.transcript or "").strip()
+            user_for_context = raw_transcript
+            session["user_utterances"].append(raw_transcript)
+
+            # Lazy-init learner confidence bucket (internal only)
+            session.setdefault("learner_level", "beginner")
+
+            # Pronunciation-tolerant intent inference (only when transcript looks garbled).
+            # This prevents the AI from replying to nonsense when STT is wrong.
+            if raw_transcript and likely_in_target_language(raw_transcript, target_language) and looks_garbled_transcript(raw_transcript, target_language):
+                inferred = await infer_intended_user_utterance(raw_transcript, target_language, session)
+                interpreted = (inferred.get("interpreted") or "").strip() or raw_transcript
+                needs_clar = bool(inferred.get("needs_clarification"))
+                clar_q = (inferred.get("clarification") or "").strip()
+                visual = inferred.get("visual_you_meant")
+
+                # Visual-only hint (never spoken automatically).
+                # Show only if it differs meaningfully from the raw transcript.
+                if isinstance(visual, str):
+                    v = visual.strip()
+                    if v and v != raw_transcript:
+                        yield f"data: {json.dumps({'type': 'you_meant', 'text': v})}\n\n"
+
+                # If truly ambiguous, ask a soft yes/no confirmation and stop here.
+                if needs_clar and clar_q:
+                    session["messages"].append({"role": "assistant", "content": clar_q})
+                    yield f"data: {json.dumps({'text': clar_q, 'done': False})}\n\n"
+                    yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': clar_q, 'target_language': target_language})}\n\n"
+                    return
+
+                user_for_context = interpreted
+
+            session["messages"].append({"role": "user", "content": user_for_context})
 
             response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -1320,6 +1412,149 @@ def likely_in_target_language(text: str, target_language: str) -> bool:
         return False
     return True
 
+def looks_garbled_transcript(text: str, target_language: str) -> bool:
+    """
+    Cheap trigger for "STT likely messed up".
+    We only use this to decide whether to run intent inference/repair.
+    """
+    if not text:
+        return False
+    t = text.strip()
+    if len(t) < 6:
+        return False
+    # Replacement char / obvious corruption
+    if "�" in t:
+        return True
+
+    # Script mismatches are a strong signal.
+    has_deva = bool(re.search(r"[\u0900-\u097F]", t))
+    has_arab = bool(re.search(r"[\u0600-\u06FF]", t))
+    has_cjk = bool(re.search(r"[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]", t))
+
+    latin_targets = {"en", "es", "fr", "de", "nl", "it", "pt"}
+    if target_language in latin_targets and (has_deva or has_arab or has_cjk):
+        return True
+    if target_language == "hi" and not has_deva:
+        # Hindi should contain Devanagari; if it doesn't, transcript is likely off.
+        return True
+
+    # Low letter ratio often indicates garbage punctuation / fragments
+    letters = len(re.findall(r"[^\W\d_]", t, flags=re.UNICODE))
+    if letters / max(1, len(t)) < 0.55:
+        return True
+
+    # Too many mixed separators / fragments
+    if len(re.findall(r"[/\\|_]+", t)) >= 2:
+        return True
+
+    return False
+
+async def infer_intended_user_utterance(
+    transcript: str,
+    target_language: str,
+    session: dict,
+) -> dict:
+    """
+    Context-aware, confidence-safe intent inference for noisy STT.
+
+    Returns dict:
+      - interpreted: str (best-guess intended utterance; may equal transcript)
+      - needs_clarification: bool
+      - clarification: str (soft yes/no confirmation, target language)
+      - visual_you_meant: Optional[str] (correct/natural phrasing to show visually only)
+    """
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    # Pull minimal context (last assistant line + topic) to bias interpretation.
+    last_ai = ""
+    try:
+        for m in reversed(session.get("messages", [])):
+            if m.get("role") == "assistant" and (m.get("content") or "").strip():
+                last_ai = (m.get("content") or "").strip()
+                break
+    except Exception:
+        last_ai = ""
+
+    topic = session.get("topic", "random") or "random"
+    topic_hint = TOPIC_CONTEXT.get(topic, TOPIC_CONTEXT["random"])
+
+    learner_level = session.get("learner_level") or "beginner"
+
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an intent inference engine for a speaking-first language app.\n"
+                        "The user is a language learner. Their pronunciation may be inaccurate.\n"
+                        "Speech transcription may contain errors.\n"
+                        "Infer intent generously. Prefer meaningful interpretation over literal words.\n"
+                        "Never assume the user said something strange on purpose.\n"
+                        "Never mention pronunciation, 'STT', 'transcription', or mistakes.\n"
+                        "If ambiguous, ask a soft yes/no confirmation (do NOT say 'I didn’t understand').\n\n"
+                        f"TARGET LANGUAGE: {target_name} ({target_language}). Output must be in the target language and native script.\n"
+                        f"LEARNER LEVEL (internal): {learner_level} (be extra forgiving for beginner).\n\n"
+                        "Return JSON only with these keys:\n"
+                        "{\"interpreted\": str, \"needs_clarification\": bool, \"clarification\": str, \"visual_you_meant\": str|null}\n\n"
+                        "Rules:\n"
+                        "- interpreted: best guess of what the user MEANT to say (1 sentence max).\n"
+                        "- If transcript is already fine, set interpreted equal to transcript and visual_you_meant=null.\n"
+                        "- If transcript looks wrong but intent is clear, set interpreted to the intended meaning.\n"
+                        "- visual_you_meant: a clean, natural version of interpreted suitable for showing on screen as 'You meant:' (target language). Use null if no visual help needed.\n"
+                        "- needs_clarification=true ONLY if there are 2+ plausible intents.\n"
+                        "- clarification must be a short yes/no question that confirms the best guess.\n"
+                        "- Never include English (unless target_language is en).\n"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "topic_hint": topic_hint,
+                            "last_ai": last_ai,
+                            "transcript": transcript,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=220,
+            temperature=0.0,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        interpreted = (data.get("interpreted") or "").strip()
+        needs = bool(data.get("needs_clarification"))
+        clarification = (data.get("clarification") or "").strip()
+        visual = data.get("visual_you_meant")
+        visual = (visual or "").strip() if isinstance(visual, str) else None
+
+        # Safety fallbacks
+        if not interpreted:
+            interpreted = transcript.strip()
+        if needs and not clarification:
+            # Conservative fallback: don't block; just proceed with interpreted.
+            needs = False
+        # If visual is identical, suppress.
+        if visual and interpreted and visual.strip() == interpreted.strip():
+            # Still okay to show, but keep it minimal: show only if transcript differs.
+            visual = visual.strip()
+        return {
+            "interpreted": interpreted,
+            "needs_clarification": needs,
+            "clarification": clarification,
+            "visual_you_meant": visual,
+        }
+    except Exception as e:
+        print(f"[INTENT INFER] failed: {e}")
+        return {
+            "interpreted": transcript.strip(),
+            "needs_clarification": False,
+            "clarification": "",
+            "visual_you_meant": None,
+        }
+
 async def check_user_repeated_translation(user_text: str, target_language: str, expected: str) -> bool:
     """
     Gate for "translation pending" flow.
@@ -1352,6 +1587,22 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
             ratio = SequenceMatcher(None, nu, ne).ratio()
             # For short phrases, be more lenient
             if ratio >= (0.78 if len(ne) >= 18 else 0.70):
+                return True
+
+    # Deterministic accept for Hindi when mostly the same Devanagari string (minor Whisper noise).
+    if target_language == "hi":
+        from difflib import SequenceMatcher
+
+        def _norm_hi(s: str) -> str:
+            s = re.sub(r"[^\u0900-\u097F\s]", " ", s)  # keep Devanagari + spaces
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+
+        nu = _norm_hi(user_text)
+        ne = _norm_hi(expected)
+        if nu and ne:
+            ratio = SequenceMatcher(None, nu, ne).ratio()
+            if ratio >= (0.80 if len(ne) >= 14 else 0.72):
                 return True
 
     def _tokenize_latin(s: str) -> list[str]:

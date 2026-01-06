@@ -159,6 +159,7 @@ export function useApi() {
     audioSpeed,
     setCurrentCorrection,
     setCurrentTranslation,
+    setCurrentYouMeant,
     currentTranslation,
     selectedTopic,
     selectedRoleplayId,
@@ -355,6 +356,15 @@ export function useApi() {
               }
               if (data.type === 'translation_clear') {
                 setCurrentTranslation(null)
+                continue
+              }
+              // Visual-only intent hint (shown on screen only; NOT spoken)
+              if (data.type === 'you_meant' && data.text) {
+                setCurrentYouMeant(data.text)
+                continue
+              }
+              if (data.type === 'you_meant_clear') {
+                setCurrentYouMeant(null)
                 continue
               }
               if (data.text) {
