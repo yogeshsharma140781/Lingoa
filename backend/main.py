@@ -759,47 +759,26 @@ async def transcribe_audio(
                 "response_format": "verbose_json",
             }
             if language_hint:
+                # Force transcription in the specified language - this is not just a hint, it forces the output language
                 kwargs["language"] = language_hint
+                print(f"[TRANSCRIBE] Forcing language={language_hint}")
             t = await client.audio.transcriptions.create(**kwargs)
             text_out = (getattr(t, "text", None) or "").strip()
             detected_out = getattr(t, "language", None)
             used_hint_out = language_hint
+            print(f"[TRANSCRIBE] Result: text={text_out[:80]!r}, detected={detected_out}, forced={language_hint}")
             return text_out, detected_out, used_hint_out
 
-        # First pass: try with target language hint (if provided)
+        # When we have a hint (target language), force transcription in that language.
+        # Trust the transcription we get - even if Whisper's detected_language differs,
+        # the text should be in the target language because we forced it.
         text, detected, used_hint = await _transcribe_once(hint_code if use_hint else None)
         
-        # Only use fallback if the transcript is CLEARLY wrong:
-        # 1. Wrong script (Devanagari/Arabic/CJK when target is Latin)
-        # 2. Obvious corruption (replacement chars)
-        # 3. Very short/empty result
-        # Do NOT fallback just because detected language doesn't match - imperfect pronunciation is normal!
-        should_fallback = False
-        if use_hint and text:
-            # Check for obvious corruption
-            if "�" in text:
-                should_fallback = True
-                print(f"[TRANSCRIBE] Corruption detected, will try fallback")
-            # Check for wrong script (strong signal)
-            elif hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
-                should_fallback = True
-                print(f"[TRANSCRIBE] Wrong script detected for {hint_code}, will try fallback")
-            # Check if transcript is suspiciously short (might be incomplete)
-            elif len(text.strip()) < 3:
-                should_fallback = True
-                print(f"[TRANSCRIBE] Very short transcript, will try fallback")
-        
-        if should_fallback and use_fallback:
-            print(f"[TRANSCRIBE] Retrying with fallback={fallback_code} (original: {text[:80]!r})")
-            text2, detected2, used_hint2 = await _transcribe_once(fallback_code)
-            if text2 and len(text2.strip()) >= 3:
-                # Use fallback result only if it's reasonable
-                text, detected, used_hint = text2, detected2, used_hint2
-                print(f"[TRANSCRIBE] Using fallback transcript: {text[:80]!r}")
-        
-        # Legacy script mismatch check (keep for backward compatibility)
+        # Only retry if there's a clear script mismatch (wrong script entirely, not just language detection)
+        # This handles rare cases where forcing a language still produces wrong script.
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
-            # Retry with auto-detect; keep whichever looks less wrong.
+            # Retry with auto-detect only if we got completely wrong script
+            print(f"[TRANSCRIBE] Wrong script despite hint={hint_code}, retrying auto-detect")
             text2, detected2, used_hint2 = await _transcribe_once(None)
             if text2 and not _looks_like_wrong_script_for_latin(text2):
                 text, detected, used_hint = text2, detected2, used_hint2
@@ -962,30 +941,16 @@ async def respond_to_user(data: UserMessage):
             # Lazy-init learner confidence bucket (internal only)
             session.setdefault("learner_level", "beginner")
 
-            # Pronunciation-tolerant intent inference:
-            # 1. If transcript is garbled (corrupted/wrong script) - run inference
-            # 2. If detected language doesn't match target (e.g., English when learning Dutch) - run inference
-            # This handles imperfect pronunciation where Whisper hears English but user meant Dutch.
-            detected_lang_norm = normalize_lang_code(data.detected_language)
-            # Check if we're learning a non-English language but Whisper detected English (or transcript looks English)
-            wrong_language_detected = (
-                target_language != "en" and 
-                (
-                    (detected_is_supported and detected_lang_norm == "en") or 
-                    looks_like_english(raw_transcript)
-                )
-            )
-            
+            # Pronunciation-tolerant intent inference: only when transcript is garbled (corrupted/wrong script).
+            # We trust the transcription when we force the target language - even if pronunciation is imperfect,
+            # Whisper should transcribe it in the target language.
             should_infer = False
             if raw_transcript:
-                # Case 1: Garbled transcript (corruption/wrong script)
+                # Only trigger on garbled transcripts (corruption/wrong script), not language mismatches.
+                # When we force target language, we trust that transcription.
                 if likely_in_target_language(raw_transcript, target_language) and looks_garbled_transcript(raw_transcript, target_language):
                     should_infer = True
                     print(f"[INTENT INFERENCE] Trigger: garbled transcript")
-                # Case 2: Wrong language detected (English when learning Dutch, etc.)
-                elif wrong_language_detected:
-                    should_infer = True
-                    print(f"[INTENT INFERENCE] Trigger: language mismatch (detected={detected_lang_norm}, target={target_language}, transcript={raw_transcript[:60]!r})")
 
             if should_infer:
                 inferred = await infer_intended_user_utterance(raw_transcript, target_language, session)
