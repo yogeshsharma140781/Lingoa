@@ -265,9 +265,9 @@ export function ConversationScreen() {
     
     if (blob && blob.size > 0) {
       try {
-        // If a translation is currently pending, bias transcription toward the target language
-        // so Whisper doesn't mis-detect Dutch pronunciation as Arabic, etc.
-        const transcription = await transcribeAudio(blob, currentTranslation ? targetLanguage : null)
+        // Always use target language as hint to help Whisper interpret imperfect pronunciation
+        // During translation repeat step, we still pass targetLanguage to bias toward correct language
+        const transcription = await transcribeAudio(blob, targetLanguage)
         
         if (transcription?.text && transcription.text.trim()) {
           const transcript = transcription.text

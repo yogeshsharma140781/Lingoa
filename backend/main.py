@@ -769,20 +769,33 @@ async def transcribe_audio(
         # First pass: try with target language hint (if provided)
         text, detected, used_hint = await _transcribe_once(hint_code if use_hint else None)
         
-        # If we used a hint and the result looks garbled, retry with fallback language
-        if use_hint and text and looks_garbled_transcript(text, hint_code):
-            print(f"[TRANSCRIBE] First pass garbled (hint={hint_code}): {text[:80]!r}, retrying with fallback={fallback_code}")
-            if use_fallback:
-                text2, detected2, used_hint2 = await _transcribe_once(fallback_code)
-                if text2 and not looks_garbled_transcript(text2, fallback_code):
-                    # Fallback looks better, use it
-                    text, detected, used_hint = text2, detected2, used_hint2
-                    print(f"[TRANSCRIBE] Fallback succeeded: {text[:80]!r}")
-            else:
-                # No fallback provided, try auto-detect as last resort
-                text2, detected2, used_hint2 = await _transcribe_once(None)
-                if text2 and not looks_garbled_transcript(text2, hint_code):
-                    text, detected, used_hint = text2, detected2, used_hint2
+        # Only use fallback if the transcript is CLEARLY wrong:
+        # 1. Wrong script (Devanagari/Arabic/CJK when target is Latin)
+        # 2. Obvious corruption (replacement chars)
+        # 3. Very short/empty result
+        # Do NOT fallback just because detected language doesn't match - imperfect pronunciation is normal!
+        should_fallback = False
+        if use_hint and text:
+            # Check for obvious corruption
+            if "�" in text:
+                should_fallback = True
+                print(f"[TRANSCRIBE] Corruption detected, will try fallback")
+            # Check for wrong script (strong signal)
+            elif hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
+                should_fallback = True
+                print(f"[TRANSCRIBE] Wrong script detected for {hint_code}, will try fallback")
+            # Check if transcript is suspiciously short (might be incomplete)
+            elif len(text.strip()) < 3:
+                should_fallback = True
+                print(f"[TRANSCRIBE] Very short transcript, will try fallback")
+        
+        if should_fallback and use_fallback:
+            print(f"[TRANSCRIBE] Retrying with fallback={fallback_code} (original: {text[:80]!r})")
+            text2, detected2, used_hint2 = await _transcribe_once(fallback_code)
+            if text2 and len(text2.strip()) >= 3:
+                # Use fallback result only if it's reasonable
+                text, detected, used_hint = text2, detected2, used_hint2
+                print(f"[TRANSCRIBE] Using fallback transcript: {text[:80]!r}")
         
         # Legacy script mismatch check (keep for backward compatibility)
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
