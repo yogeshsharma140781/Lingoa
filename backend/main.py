@@ -962,9 +962,32 @@ async def respond_to_user(data: UserMessage):
             # Lazy-init learner confidence bucket (internal only)
             session.setdefault("learner_level", "beginner")
 
-            # Pronunciation-tolerant intent inference (only when transcript looks garbled).
-            # This prevents the AI from replying to nonsense when STT is wrong.
-            if raw_transcript and likely_in_target_language(raw_transcript, target_language) and looks_garbled_transcript(raw_transcript, target_language):
+            # Pronunciation-tolerant intent inference:
+            # 1. If transcript is garbled (corrupted/wrong script) - run inference
+            # 2. If detected language doesn't match target (e.g., English when learning Dutch) - run inference
+            # This handles imperfect pronunciation where Whisper hears English but user meant Dutch.
+            detected_lang_norm = normalize_lang_code(data.detected_language)
+            # Check if we're learning a non-English language but Whisper detected English (or transcript looks English)
+            wrong_language_detected = (
+                target_language != "en" and 
+                (
+                    (detected_is_supported and detected_lang_norm == "en") or 
+                    looks_like_english(raw_transcript)
+                )
+            )
+            
+            should_infer = False
+            if raw_transcript:
+                # Case 1: Garbled transcript (corruption/wrong script)
+                if likely_in_target_language(raw_transcript, target_language) and looks_garbled_transcript(raw_transcript, target_language):
+                    should_infer = True
+                    print(f"[INTENT INFERENCE] Trigger: garbled transcript")
+                # Case 2: Wrong language detected (English when learning Dutch, etc.)
+                elif wrong_language_detected:
+                    should_infer = True
+                    print(f"[INTENT INFERENCE] Trigger: language mismatch (detected={detected_lang_norm}, target={target_language}, transcript={raw_transcript[:60]!r})")
+
+            if should_infer:
                 inferred = await infer_intended_user_utterance(raw_transcript, target_language, session)
                 interpreted = (inferred.get("interpreted") or "").strip() or raw_transcript
                 needs_clar = bool(inferred.get("needs_clarification"))
@@ -986,6 +1009,7 @@ async def respond_to_user(data: UserMessage):
                     return
 
                 user_for_context = interpreted
+                print(f"[INTENT INFERENCE] Interpreted: {raw_transcript[:60]!r} -> {interpreted[:60]!r}")
 
             session["messages"].append({"role": "user", "content": user_for_context})
 
