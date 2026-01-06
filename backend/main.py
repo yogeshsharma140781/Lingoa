@@ -725,6 +725,8 @@ async def transcribe_audio(
         use_hint = bool(hint_code) and is_supported_language_code(hint_code)
         fallback_code = normalize_lang_code(fallback_language)
         use_fallback = bool(fallback_code) and is_supported_language_code(fallback_code)
+        
+        print(f"[TRANSCRIBE] Request: language={language}, hint={hint!r} -> hint_code={hint_code}, use_hint={use_hint}")
 
         # Heuristic: if we *hinted* a Latin-script language (nl/fr/de/etc) but Whisper returns
         # a clearly non‑Latin script (e.g. Devanagari), retry once without a hint.
@@ -770,14 +772,59 @@ async def transcribe_audio(
             return text_out, detected_out, used_hint_out
 
         # When we have a hint (target language), force transcription in that language.
-        # Trust the transcription we get - even if Whisper's detected_language differs,
-        # the text should be in the target language because we forced it.
+        # If Whisper ignores our language constraint and produces wrong-language text, we need to handle it.
         text, detected, used_hint = await _transcribe_once(hint_code if use_hint else None)
         
-        # Only retry if there's a clear script mismatch (wrong script entirely, not just language detection)
-        # This handles rare cases where forcing a language still produces wrong script.
+        # Validation: if we forced a language, the transcript MUST be in that language.
+        # If it's not, Whisper ignored our constraint - reject it and retry with stronger enforcement.
+        if use_hint and text:
+            # Check if transcript is clearly NOT in the target language
+            is_wrong_language = False
+            
+            # For Latin-script languages: check if it looks like English when we forced Dutch/French/etc
+            if hint_code in latin_langs and hint_code != "en":
+                if looks_like_english(text):
+                    is_wrong_language = True
+                    print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but got English: {text[:80]!r}")
+            
+            # For Hindi: check if transcript lacks Devanagari
+            elif hint_code == "hi":
+                if not bool(re.search(r"[\u0900-\u097F]", text)):
+                    is_wrong_language = True
+                    print(f"[TRANSCRIBE] ERROR: Forced Hindi but got non-Devanagari: {text[:80]!r}")
+            
+            # For Chinese: check if transcript lacks Hanzi
+            elif hint_code == "zh":
+                if not bool(re.search(r"[\u4E00-\u9FFF]", text)):
+                    is_wrong_language = True
+                    print(f"[TRANSCRIBE] ERROR: Forced Chinese but got non-Hanzi: {text[:80]!r}")
+            
+            # For Japanese: check if transcript lacks Japanese script
+            elif hint_code == "ja":
+                if not bool(re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", text)):
+                    is_wrong_language = True
+                    print(f"[TRANSCRIBE] ERROR: Forced Japanese but got non-Japanese: {text[:80]!r}")
+            
+            # For Korean: check if transcript lacks Hangul
+            elif hint_code == "ko":
+                if not bool(re.search(r"[\uAC00-\uD7AF]", text)):
+                    is_wrong_language = True
+                    print(f"[TRANSCRIBE] ERROR: Forced Korean but got non-Hangul: {text[:80]!r}")
+            
+            # If wrong language detected, retry with auto-detect as fallback (better than wrong language)
+            if is_wrong_language:
+                print(f"[TRANSCRIBE] Retrying with auto-detect (forced {hint_code} failed)")
+                text2, detected2, used_hint2 = await _transcribe_once(None)
+                # Only use auto-detect result if it's actually in the target language
+                if text2 and likely_in_target_language(text2, hint_code):
+                    text, detected, used_hint = text2, detected2, None
+                    print(f"[TRANSCRIBE] Auto-detect succeeded: {text[:80]!r}")
+                else:
+                    # Still wrong - return empty/error or the original (user will see it's wrong)
+                    print(f"[TRANSCRIBE] Auto-detect also failed, returning forced result anyway")
+        
+        # Script mismatch check (legacy, but keep for safety)
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
-            # Retry with auto-detect only if we got completely wrong script
             print(f"[TRANSCRIBE] Wrong script despite hint={hint_code}, retrying auto-detect")
             text2, detected2, used_hint2 = await _transcribe_once(None)
             if text2 and not _looks_like_wrong_script_for_latin(text2):
