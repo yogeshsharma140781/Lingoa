@@ -279,6 +279,7 @@ export function useApi() {
   }, [sessionId, setUserStats, setImprovements, setIsAiSpeaking])
 
   // Transcribe audio (auto-detect by default; optional hint for "repeat in target language" step)
+  // Two-pass strategy: first try with target language hint, if garbled retry with fallback (English)
   const transcribeAudio = useCallback(async (
     audioBlob: Blob,
     languageHint?: string | null
@@ -287,8 +288,11 @@ export function useApi() {
       const formData = new FormData()
       formData.append('audio', audioBlob, 'audio.webm')
 
+      // Default fallback to English (most users learning other languages speak English natively)
+      const fallbackLang = 'en'
       const hintParam = languageHint ? `&hint=${encodeURIComponent(languageHint)}` : ''
-      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}`, {
+      const fallbackParam = `&fallback_language=${encodeURIComponent(fallbackLang)}`
+      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}`, {
         method: 'POST',
         body: formData,
       })

@@ -710,14 +710,21 @@ async def get_user_stats(user_id: str):
 async def transcribe_audio(
     audio: UploadFile = File(...),
     language: str = "es",
-    hint: Optional[str] = None
+    hint: Optional[str] = None,
+    fallback_language: Optional[str] = None
 ):
-    """Transcribe audio using Whisper with language hint"""
+    """
+    Transcribe audio using Whisper with two-pass strategy:
+    1. First try with target language hint (if provided)
+    2. If result is garbled, retry with fallback language (user's preferred language, usually English)
+    """
     try:
         audio_data = await audio.read()
         
         hint_code = normalize_lang_code(hint)
         use_hint = bool(hint_code) and is_supported_language_code(hint_code)
+        fallback_code = normalize_lang_code(fallback_language)
+        use_fallback = bool(fallback_code) and is_supported_language_code(fallback_code)
 
         # Heuristic: if we *hinted* a Latin-script language (nl/fr/de/etc) but Whisper returns
         # a clearly non‑Latin script (e.g. Devanagari), retry once without a hint.
@@ -759,7 +766,25 @@ async def transcribe_audio(
             used_hint_out = language_hint
             return text_out, detected_out, used_hint_out
 
+        # First pass: try with target language hint (if provided)
         text, detected, used_hint = await _transcribe_once(hint_code if use_hint else None)
+        
+        # If we used a hint and the result looks garbled, retry with fallback language
+        if use_hint and text and looks_garbled_transcript(text, hint_code):
+            print(f"[TRANSCRIBE] First pass garbled (hint={hint_code}): {text[:80]!r}, retrying with fallback={fallback_code}")
+            if use_fallback:
+                text2, detected2, used_hint2 = await _transcribe_once(fallback_code)
+                if text2 and not looks_garbled_transcript(text2, fallback_code):
+                    # Fallback looks better, use it
+                    text, detected, used_hint = text2, detected2, used_hint2
+                    print(f"[TRANSCRIBE] Fallback succeeded: {text[:80]!r}")
+            else:
+                # No fallback provided, try auto-detect as last resort
+                text2, detected2, used_hint2 = await _transcribe_once(None)
+                if text2 and not looks_garbled_transcript(text2, hint_code):
+                    text, detected, used_hint = text2, detected2, used_hint2
+        
+        # Legacy script mismatch check (keep for backward compatibility)
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
             # Retry with auto-detect; keep whichever looks less wrong.
             text2, detected2, used_hint2 = await _transcribe_once(None)
