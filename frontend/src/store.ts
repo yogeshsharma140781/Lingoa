@@ -60,6 +60,12 @@ export interface TranslationAssist {
   alternative?: string | null
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+}
+
 interface AppState {
   // Navigation
   currentScreen: Screen
@@ -111,6 +117,11 @@ interface AppState {
   setUserTranscript: (text: string) => void
   isProcessing: boolean
   setIsProcessing: (processing: boolean) => void
+  
+  // Chat history
+  conversationHistory: ChatMessage[]
+  addMessage: (role: 'user' | 'assistant', content: string) => void
+  clearHistory: () => void
 
   // Feedback
   improvements: Improvement[]
@@ -218,6 +229,17 @@ export const useStore = create<AppState>((set) => ({
   setUserTranscript: (text) => set({ userTranscript: text }),
   isProcessing: false,
   setIsProcessing: (processing) => set({ isProcessing: processing }),
+  
+  // Chat history
+  conversationHistory: [],
+  addMessage: (role, content) => set((state) => ({
+    conversationHistory: [...state.conversationHistory, {
+      role,
+      content,
+      timestamp: Date.now()
+    }]
+  })),
+  clearHistory: () => set({ conversationHistory: [] }),
 
   // Feedback
   improvements: [],
@@ -259,6 +281,7 @@ export const useStore = create<AppState>((set) => ({
     selectedTopic: null,
     selectedRoleplayId: null,
     customScenario: null,
+    conversationHistory: [],
   }),
 }))
 
