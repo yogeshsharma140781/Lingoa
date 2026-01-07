@@ -852,12 +852,8 @@ async def respond_to_user(data: UserMessage):
             )
 
             target_language = session.get("target_language", "en")
-            detected_lang = normalize_lang_code(data.detected_language)
-            detected_is_supported = is_supported_language_code(detected_lang)
             print(
-                f"[RESPOND] detected_language_raw={data.detected_language!r} "
-                f"detected_language_norm={detected_lang!r} supported={detected_is_supported} "
-                f"target_language={target_language!r} transcript={data.transcript!r}"
+                f"[RESPOND] target_language={target_language!r} transcript={data.transcript!r}"
             )
 
             # If the client includes a pending translation (e.g. across instance restarts),
@@ -876,45 +872,19 @@ async def respond_to_user(data: UserMessage):
                     # Always keep translation visible on screen
                     yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
 
-                # Clear rule (per product requirement):
-                # - If Whisper detected the user's utterance is in the target language => proceed.
-                # - If detected language is missing or unreliable, use a conservative fallback:
-                #   clear only when the utterance clearly appears to be in the target language.
-                if detected_is_supported and detected_lang == target_language:
-                    # Prefer a near-match check, but don't trap the user forever.
-                    # After a couple attempts, accept if they're speaking the target language.
-                    said_it = await check_user_repeated_translation(
-                        user_text=data.transcript,
-                        target_language=target_language,
-                        expected=expected,
-                    )
-                    if not said_it and attempts >= 3 and likely_in_target_language(data.transcript, target_language):
+                # Clear rule (per product requirement), assuming user is TRYING to speak the target language:
+                # - Prefer a near-match check to avoid accepting completely different sentences.
+                # - After a few attempts, be forgiving and accept if the utterance broadly looks like target language.
+                said_it = await check_user_repeated_translation(
+                    user_text=data.transcript,
+                    target_language=target_language,
+                    expected=expected,
+                )
+                if not said_it:
+                    # Forgive after several tries as long as it roughly looks like the target language.
+                    if attempts >= 3 and likely_in_target_language(data.transcript, target_language):
                         said_it = True
-                else:
-                    # If we deterministically detect mismatch, do NOT clear.
-                    # Only trust detected_language mismatch if it's one of our supported codes.
-                    if (detected_is_supported and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
-                        said_it = False
-                    else:
-                        # Fallback: allow proceed when utterance doesn't look like English (for Latin targets),
-                        # or has the correct script (for non-Latin targets).
-                        if target_language in {"es", "fr", "de", "nl", "it", "pt"}:
-                            said_it = not looks_like_english(data.transcript)
-                        elif target_language == "hi":
-                            said_it = bool(re.search(r"[\u0900-\u097F]", data.transcript))
-                        elif target_language == "zh":
-                            said_it = bool(re.search(r"[\u4E00-\u9FFF]", data.transcript))
-                        elif target_language == "ja":
-                            said_it = bool(re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", data.transcript))
-                        elif target_language == "ko":
-                            said_it = bool(re.search(r"[\uAC00-\uD7AF]", data.transcript))
-                        else:
-                            # As a safe default, require the best-effort repeat check.
-                            said_it = await check_user_repeated_translation(
-                                user_text=data.transcript,
-                                target_language=target_language,
-                                expected=expected,
-                            )
+
                 print(f"[TRANSLATION PENDING] lang={target_language} attempts={attempts} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
                 if said_it:
                     session["translation_pending"] = None
@@ -929,12 +899,12 @@ async def respond_to_user(data: UserMessage):
                     return
 
             # Translation assist:
-            # If user asks for help OR speaks in a different language than the target, show translation and wait.
-            # Only trust detected_language mismatch if it's one of our supported codes.
-            if (detected_is_supported and detected_lang != target_language) or force_translation_needed(data.transcript, target_language):
+            # If user explicitly asks for help (\"How do you say...\" etc) OR clearly needs translation,
+            # show translation and wait. We do NOT rely on Whisper's detected_language; we always assume
+            # the user is trying to work in the target language.
+            classified = await classify_translation_request(data.transcript, target_language, session)
+            if not classified.get("needs_translation") and force_translation_needed(data.transcript, target_language):
                 classified = {"needs_translation": True, "payload": data.transcript.strip()}
-            else:
-                classified = await classify_translation_request(data.transcript, target_language, session)
 
             if classified.get("needs_translation"):
                 try:
