@@ -871,11 +871,9 @@ async def respond_to_user(data: UserMessage):
                 session["translation_pending"] = data.translation_pending
 
             # Translation assist:
-            # If user explicitly asks for help (\"How do you say...\" etc) OR clearly needs translation,
-            # show translation on screen ONLY. Do NOT block conversation or ask them to repeat.
+            # Only trigger on explicit translation requests ("How do you say...", etc.)
+            # Do NOT trigger on language mismatch - we assume user is speaking target language.
             classified = await classify_translation_request(data.transcript, target_language, session)
-            if not classified.get("needs_translation") and force_translation_needed(data.transcript, target_language):
-                classified = {"needs_translation": True, "payload": data.transcript.strip()}
 
             if classified.get("needs_translation"):
                 try:
@@ -1723,10 +1721,14 @@ async def classify_translation_request(transcript: str, target_language: str, se
     if not transcript:
         return {"needs_translation": False, "payload": ""}
 
-    # Deterministic fast-path: if user is clearly speaking English while learning a non-English language,
-    # treat it as translation assist (this is the most common real case).
-    if target_language != "en" and looks_like_english(transcript):
-        return {"needs_translation": True, "payload": transcript.strip()}
+    # Only trigger translation assist on explicit requests ("how do you say...", etc.)
+    # Do NOT trigger just because user is speaking English - we assume they're trying to speak target language.
+    # Check for explicit translation request patterns first
+    has_translation_request_pattern = bool(
+        re.search(r"\b(how\s+do\s+(?:you|i)\s+say|what'?s?\s+.+\s+in\s+\w+|translate)", transcript, flags=re.IGNORECASE)
+    )
+    if not has_translation_request_pattern:
+        return {"needs_translation": False, "payload": ""}
 
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")
     roleplay_id = session.get("roleplay_id")
