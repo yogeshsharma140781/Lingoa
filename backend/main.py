@@ -857,51 +857,13 @@ async def respond_to_user(data: UserMessage):
             )
 
             # If the client includes a pending translation (e.g. across instance restarts),
-            # merge it into the session so we reliably gate.
+            # we keep it in session for reference, but we NO LONGER gate on \"say it again\".
             if data.translation_pending and not session.get("translation_pending"):
                 session["translation_pending"] = data.translation_pending
 
-            # If we are waiting for the user to repeat a translated phrase, gate the conversation here.
-            pending = session.get("translation_pending")
-            if pending and isinstance(pending, dict):
-                expected = pending.get("translation") or ""
-                # Track attempts to avoid trapping beginners in a loop.
-                attempts = int(pending.get("attempts") or 0) + 1
-                pending["attempts"] = attempts
-                if expected:
-                    # Always keep translation visible on screen
-                    yield f"data: {json.dumps({'type': 'translation', 'source': pending.get('source', ''), 'translation': expected, 'alternative': pending.get('alternative')})}\n\n"
-
-                # Clear rule (per product requirement), assuming user is TRYING to speak the target language:
-                # - Prefer a near-match check to avoid accepting completely different sentences.
-                # - After a few attempts, be forgiving and accept if the utterance broadly looks like target language.
-                said_it = await check_user_repeated_translation(
-                    user_text=data.transcript,
-                    target_language=target_language,
-                    expected=expected,
-                )
-                if not said_it:
-                    # Forgive after several tries as long as it roughly looks like the target language.
-                    if attempts >= 3 and likely_in_target_language(data.transcript, target_language):
-                        said_it = True
-
-                print(f"[TRANSLATION PENDING] lang={target_language} attempts={attempts} said_it={said_it} user={data.transcript!r} expected={expected[:80]!r}")
-                if said_it:
-                    session["translation_pending"] = None
-                    yield f"data: {json.dumps({'type': 'translation_clear'})}\n\n"
-                    # Now proceed as normal with this user utterance as the next message in context
-                else:
-                    # Nudge again, don't progress the conversation
-                    spoken = translation_nudge(target_language)
-                    session["messages"].append({"role": "assistant", "content": spoken})
-                    yield f"data: {json.dumps({'text': spoken, 'done': False})}\n\n"
-                    yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': spoken, 'target_language': target_language})}\n\n"
-                    return
-
             # Translation assist:
             # If user explicitly asks for help (\"How do you say...\" etc) OR clearly needs translation,
-            # show translation and wait. We do NOT rely on Whisper's detected_language; we always assume
-            # the user is trying to work in the target language.
+            # show translation on screen ONLY. Do NOT block conversation or ask them to repeat.
             classified = await classify_translation_request(data.transcript, target_language, session)
             if not classified.get("needs_translation") and force_translation_needed(data.transcript, target_language):
                 classified = {"needs_translation": True, "payload": data.transcript.strip()}
@@ -932,23 +894,11 @@ async def respond_to_user(data: UserMessage):
                     if assist.get("alternative"):
                         assist["alternative"] = await ensure_target_language(assist["alternative"], target_language)
                     if assist.get("translation"):
-                        # Persist until user repeats it in target language
-                        session["translation_pending"] = {
-                            "source": payload,
-                            "translation": assist["translation"],
-                            "alternative": assist.get("alternative"),
-                        }
-                        print(f"[TRANSLATION ASSIST] set pending lang={target_language} source={payload!r} translation={assist['translation'][:80]!r}")
+                        # Show translation card, but DO NOT set translation_pending or block flow.
+                        print(f"[TRANSLATION ASSIST] on-the-fly lang={target_language} source={payload!r} translation={assist['translation'][:80]!r}")
                         yield f"data: {json.dumps({'type': 'translation', 'source': payload, 'translation': assist['translation'], 'alternative': assist.get('alternative')})}\n\n"
                 except Exception as e:
                     print(f"[TRANSLATION ASSIST] failed: {e}")
-
-                # Speak a tiny nudge (do NOT read the translation aloud)
-                spoken = translation_nudge(target_language)
-                session["messages"].append({"role": "assistant", "content": spoken})
-                yield f"data: {json.dumps({'text': spoken, 'done': False})}\n\n"
-                yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': spoken, 'target_language': target_language})}\n\n"
-                return
 
             # Normal conversation: add user message to context
             raw_transcript = (data.transcript or "").strip()
