@@ -296,14 +296,16 @@ export function ConversationScreen() {
           // previous AI question stays visible while the user is speaking.
           clearAiMessage()
           
-          // Add user message to history
-          addMessage('user', transcript)
+          // Add user message to history (only if valid)
+          if (transcript && transcript.trim() && transcript !== 'Transcribing...') {
+            addMessage('user', transcript.trim())
+          }
           
           const response = await getAiResponse(transcript, transcription?.detectedLanguage ?? null)
           
-          if (response) {
+          if (response && response.trim()) {
             // Add AI response to history
-            addMessage('assistant', response)
+            addMessage('assistant', response.trim())
             setUserTranscript('')
             await textToSpeech(response)
           }
@@ -661,23 +663,25 @@ export function ConversationScreen() {
       <div className="flex-1 flex flex-col items-center justify-start w-full px-6 overflow-y-auto pt-4">
         {/* Chat History - Scrollable */}
         {conversationHistory.length > 0 && (
-          <div className="w-full mb-6 max-h-64 overflow-y-auto">
+          <div className="w-full mb-6 max-h-64 overflow-y-auto px-2">
             <div className="space-y-3">
               {conversationHistory.map((msg, idx) => (
-                <div
+                <motion.div
                   key={idx}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2 ${
+                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
                       msg.role === 'user'
                         ? 'bg-primary-500 text-white'
-                        : 'bg-surface-700 text-surface-200'
+                        : 'bg-surface-700 text-surface-200 border border-surface-600'
                     }`}
                   >
-                    <p className="text-sm leading-relaxed break-words">{msg.content}</p>
+                    <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
