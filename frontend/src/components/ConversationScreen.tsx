@@ -279,11 +279,6 @@ export function ConversationScreen() {
           setUserTranscript(transcript)
           clearCorrection() // Clear any previous correction
           
-          // Clear translation card if user said something else that was understood
-          if (currentTranslation) {
-            setCurrentTranslation(null)
-          }
-          
           // Analyze speech for corrections only when the user is already speaking the target language.
           // If they're speaking English while learning Dutch (etc), we want translation-assist to take over,
           // and we should not show a "correction" card that looks like a translation.
@@ -308,6 +303,13 @@ export function ConversationScreen() {
           }
           
           const response = await getAiResponse(transcript, transcription?.detectedLanguage ?? null)
+          
+          // Clear translation card AFTER processing response (even if backend sent translation event)
+          // Only clear if user didn't explicitly ask for translation (check if transcript looks like translation request)
+          const isTranslationRequest = /\b(how\s+do\s+(?:you|i)\s+say|what'?s?\s+.+\s+in|translate)\b/i.test(transcript)
+          if (!isTranslationRequest && currentTranslation) {
+            setCurrentTranslation(null)
+          }
           
           if (response && response.trim()) {
             // Add AI response to history
