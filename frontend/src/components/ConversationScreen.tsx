@@ -304,11 +304,14 @@ export function ConversationScreen() {
           
           const response = await getAiResponse(transcript, transcription?.detectedLanguage ?? null)
           
-          // Clear translation card AFTER processing response (even if backend sent translation event)
+          // Clear translation card AFTER processing response
           // Only clear if user didn't explicitly ask for translation (check if transcript looks like translation request)
           const isTranslationRequest = /\b(how\s+do\s+(?:you|i)\s+say|what'?s?\s+.+\s+in|translate)\b/i.test(transcript)
-          if (!isTranslationRequest && currentTranslation) {
-            setCurrentTranslation(null)
+          if (!isTranslationRequest) {
+            // Small delay to ensure SSE events are processed first, then clear
+            setTimeout(() => {
+              setCurrentTranslation(null)
+            }, 100)
           }
           
           if (response && response.trim()) {
