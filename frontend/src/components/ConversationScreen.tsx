@@ -33,6 +33,7 @@ export function ConversationScreen() {
     setIsProcessing,
     currentCorrection,
     currentTranslation,
+    setCurrentTranslation,
     currentYouMeant,
     setCurrentYouMeant,
     audioSilentMode,
@@ -277,6 +278,11 @@ export function ConversationScreen() {
           const transcript = transcription.text
           setUserTranscript(transcript)
           clearCorrection() // Clear any previous correction
+          
+          // Clear translation card if user said something else that was understood
+          if (currentTranslation) {
+            setCurrentTranslation(null)
+          }
           
           // Analyze speech for corrections only when the user is already speaking the target language.
           // If they're speaking English while learning Dutch (etc), we want translation-assist to take over,
