@@ -657,32 +657,31 @@ export function ConversationScreen() {
         )}
       </AnimatePresence>
 
-      {/* Chat History - Scrollable */}
-      {conversationHistory.length > 0 && (
-        <div className="w-full px-4 mb-4 max-h-48 overflow-y-auto">
-          <div className="space-y-3">
-            {conversationHistory.map((msg, idx) => (
-              <div
-                key={idx}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                    msg.role === 'user'
-                      ? 'bg-primary-500 text-white'
-                      : 'bg-surface-700 text-surface-200'
-                  }`}
-                >
-                  <p className="text-sm leading-relaxed">{msg.content}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Main speaking area */}
       <div className="flex-1 flex flex-col items-center justify-start w-full px-6 overflow-y-auto pt-4">
+        {/* Chat History - Scrollable */}
+        {conversationHistory.length > 0 && (
+          <div className="w-full mb-6 max-h-64 overflow-y-auto">
+            <div className="space-y-3">
+              {conversationHistory.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-2 ${
+                      msg.role === 'user'
+                        ? 'bg-primary-500 text-white'
+                        : 'bg-surface-700 text-surface-200'
+                    }`}
+                  >
+                    <p className="text-sm leading-relaxed break-words">{msg.content}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {/* Speaking visualization */}
         <div className="relative mb-8">
           {/* Outer rings - show when waiting for user (listening mode) */}
