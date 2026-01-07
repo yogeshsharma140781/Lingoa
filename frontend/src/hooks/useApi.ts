@@ -283,7 +283,7 @@ export function useApi() {
   const transcribeAudio = useCallback(async (
     audioBlob: Blob,
     languageHint?: string | null
-  ): Promise<{ text: string; detectedLanguage?: string | null } | null> => {
+  ): Promise<{ text: string; detectedLanguage?: string | null; validForTarget?: boolean } | null> => {
     try {
       const formData = new FormData()
       formData.append('audio', audioBlob, 'audio.webm')
@@ -299,7 +299,9 @@ export function useApi() {
 
       if (res.ok) {
         const data = await res.json()
-        return { text: data.transcript, detectedLanguage: data.detected_language }
+        // If backend says transcript is not valid for target language, treat as empty.
+        const text = data.valid_for_target === false ? '' : data.transcript
+        return { text, detectedLanguage: data.detected_language, validForTarget: data.valid_for_target }
       }
     } catch (err) {
       console.error('Transcription error:', err)

@@ -830,8 +830,17 @@ async def transcribe_audio(
             if text2 and not _looks_like_wrong_script_for_latin(text2):
                 text, detected, used_hint = text2, detected2, used_hint2
         
+        # Final validity check: is this transcript plausible for the target language?
+        target_code = normalize_lang_code(hint_code or language)
+        is_valid = True
+        if target_code and target_code in SUPPORTED_LANGUAGE_CODES:
+            if not likely_in_target_language(text, target_code):
+                print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
+                is_valid = False
+                # Treat invalid as no transcript so frontend can handle it like \"no speech\"
+                text = ""
         # verbose_json includes language + text
-        return {"transcript": text, "detected_language": detected, "used_hint": used_hint}
+        return {"transcript": text, "detected_language": detected, "used_hint": used_hint, "valid_for_target": is_valid}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
