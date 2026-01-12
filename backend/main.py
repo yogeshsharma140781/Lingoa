@@ -955,6 +955,8 @@ async def transcribe_audio(
             is_wrong_language = False
             
             # First check: Whisper's detected language should match the forced language
+            # This is the most reliable check - if Whisper detected a different language, reject it
+            # Especially important: if we forced Dutch/German/etc and Whisper detected English, reject it
             if detected:
                 detected_normalized = normalize_lang_code(detected)
                 if detected_normalized and detected_normalized != hint_code:
@@ -962,10 +964,12 @@ async def transcribe_audio(
                     print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but Whisper detected {detected_normalized}: {text[:80]!r}")
             
             # For Latin-script languages: check if it looks like English when we forced Dutch/French/etc
+            # This catches cases where Whisper might not return detected language but still transcribes in English
+            # This is a critical backup check for when detected language is missing or incorrect
             if hint_code in latin_langs and hint_code != "en":
                 if looks_like_english(text):
                     is_wrong_language = True
-                    print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but got English: {text[:80]!r}")
+                    print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but text looks like English: {text[:80]!r}")
             
             # For Hindi: check if transcript lacks Devanagari
             elif hint_code == "hi":
@@ -1010,15 +1014,33 @@ async def transcribe_audio(
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
             print(f"[TRANSCRIBE] Wrong script despite hint={hint_code}, retrying auto-detect")
             text2, detected2, used_hint2 = await _transcribe_once(None)
+            # Only use auto-detect result if it's valid for target language
             if text2 and not _looks_like_wrong_script_for_latin(text2):
-                text, detected, used_hint = text2, detected2, used_hint2
+                detected2_normalized = normalize_lang_code(detected2) if detected2 else None
+                # Validate that detected language matches target, or at least text is valid
+                if (detected2_normalized == hint_code or not detected2_normalized) and likely_in_target_language(text2, hint_code):
+                    text, detected, used_hint = text2, detected2, used_hint2
+                else:
+                    print(f"[TRANSCRIBE] Auto-detect from script check failed (detected={detected2_normalized}, expected={hint_code})")
+                    text = ""  # Reject wrong language
         
         # Final validity check: is this transcript plausible for the target language?
         target_code = normalize_lang_code(hint_code or language)
         is_valid = True
         original_text = text
         if target_code and target_code in SUPPORTED_LANGUAGE_CODES:
-            if not likely_in_target_language(text, target_code):
+            # Check detected language first - this is the most reliable indicator
+            if detected:
+                detected_normalized = normalize_lang_code(detected)
+                if detected_normalized and detected_normalized != target_code:
+                    print(f"[TRANSCRIBE] INVALID: Expected {target_code} but detected {detected_normalized}: {text[:80]!r}")
+                    is_valid = False
+                    text = ""
+                elif not likely_in_target_language(text, target_code):
+                    print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
+                    is_valid = False
+                    text = ""
+            elif not likely_in_target_language(text, target_code):
                 print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
                 is_valid = False
                 # Treat invalid as no transcript so frontend can handle it like \"no speech\"
@@ -1532,6 +1554,10 @@ def looks_like_english(text: str) -> bool:
         return True
     # For slightly longer replies, use a ratio.
     if len(tokens) >= 6 and hits / len(tokens) >= 0.25:
+        return True
+    # For very short phrases (1-2 words), if it contains a high-precision English word, it's likely English
+    # This catches cases like "the", "you", "what" etc. that are clearly English
+    if len(tokens) <= 2 and hits >= 1:
         return True
     return False
 
