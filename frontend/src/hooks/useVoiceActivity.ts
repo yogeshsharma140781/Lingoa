@@ -149,6 +149,12 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       mediaRecorderRef.current.stop()
     }
 
+    setIsRecording(false)
+    setIsSpeaking(false)
+    isSpeakingRef.current = false
+  }, [setIsSpeaking])
+
+  const cleanupMedia = useCallback(() => {
     // Stop stream tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
@@ -165,6 +171,78 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     setIsSpeaking(false)
     isSpeakingRef.current = false
   }, [setIsSpeaking])
+
+  // Reliable stop + blob retrieval (waits for MediaRecorder to flush final chunk).
+  const stopRecordingAndGetBlob = useCallback(async (): Promise<Blob | null> => {
+    // Cancel animation frame
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = 0
+    }
+
+    const recorder = mediaRecorderRef.current
+
+    const buildBlob = () => {
+      if (chunksRef.current.length > 0) {
+        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current })
+        chunksRef.current = []
+        return blob
+      }
+      return null
+    }
+
+    if (!recorder) {
+      const blob = buildBlob()
+      cleanupMedia()
+      return blob
+    }
+
+    // If already inactive, just build what we have.
+    if (recorder.state === 'inactive') {
+      const blob = buildBlob()
+      cleanupMedia()
+      return blob
+    }
+
+    return await new Promise<Blob | null>((resolve) => {
+      let settled = false
+
+      const finish = () => {
+        if (settled) return
+        settled = true
+        const blob = buildBlob()
+        cleanupMedia()
+        resolve(blob)
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        console.warn('[Recorder] stop timeout; finishing with available chunks')
+        finish()
+      }, 2500)
+
+      const onStop = () => {
+        window.clearTimeout(timeoutId)
+        finish()
+      }
+
+      const onError = () => {
+        window.clearTimeout(timeoutId)
+        console.warn('[Recorder] error while stopping; finishing with available chunks')
+        finish()
+      }
+
+      recorder.addEventListener('stop', onStop, { once: true })
+      recorder.addEventListener('error', onError, { once: true } as any)
+
+      try {
+        recorder.stop()
+      } catch (e) {
+        console.warn('[Recorder] stop() threw; finishing with available chunks', e)
+        window.clearTimeout(timeoutId)
+        finish()
+      }
+    })
+  }, [cleanupMedia])
 
   // Get all recorded audio and clear
   const getRecordedBlob = useCallback(() => {
@@ -261,6 +339,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     volume,
     startRecording,
     stopRecording,
+    stopRecordingAndGetBlob,
     getRecordedBlob,
     clearRecording,
   }

@@ -117,7 +117,7 @@ export function ConversationScreen() {
   }, [setMicPermission])
 
   // No auto-trigger - we only use the Done button
-  const { volume, startRecording, stopRecording, getRecordedBlob } = useVoiceActivity({
+  const { volume, startRecording, stopRecording, stopRecordingAndGetBlob } = useVoiceActivity({
     silenceTimeout: 600, // Pause timer after 0.6s of silence for responsive pausing
   })
 
@@ -259,14 +259,8 @@ export function ConversationScreen() {
     setUserTranscript('Transcribing...')
     setCurrentYouMeant(null)
     
-    // Stop recording to get final audio
-    stopRecording()
-    
-    // Small delay to ensure recording is fully stopped
-    await new Promise(r => setTimeout(r, 100))
-    
-    // Get recorded audio
-    const blob = getRecordedBlob()
+    // Stop recording and wait for MediaRecorder to flush final chunk (Safari/WKWebView needs this)
+    const blob = await stopRecordingAndGetBlob()
     
     if (blob && blob.size > 0) {
       try {
