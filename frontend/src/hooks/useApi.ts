@@ -280,19 +280,31 @@ export function useApi() {
 
   // Transcribe audio (auto-detect by default; optional hint for "repeat in target language" step)
   // Two-pass strategy: first try with target language hint, if garbled retry with fallback (English)
+  // Now includes intelligent sentence matching and improvement using conversation context
   const transcribeAudio = useCallback(async (
     audioBlob: Blob,
     languageHint?: string | null
-  ): Promise<{ text: string; detectedLanguage?: string | null; validForTarget?: boolean } | null> => {
+  ): Promise<{ text: string; detectedLanguage?: string | null; validForTarget?: boolean; improvement?: any } | null> => {
     try {
       const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
+      // Use a filename that matches the actual mimeType.
+      // Whisper accepts webm, mp4, m4a, wav, mp3, etc.
+      const ct = (audioBlob?.type || '').toLowerCase()
+      const filename =
+        ct.includes('audio/mp4') ? 'audio.m4a' :
+        ct.includes('audio/m4a') ? 'audio.m4a' :
+        ct.includes('audio/wav') ? 'audio.wav' :
+        ct.includes('audio/mpeg') ? 'audio.mp3' :
+        'audio.webm'
+      formData.append('audio', audioBlob, filename)
 
       // Default fallback to English (most users learning other languages speak English natively)
       const fallbackLang = 'en'
       const hintParam = languageHint ? `&hint=${encodeURIComponent(languageHint)}` : ''
       const fallbackParam = `&fallback_language=${encodeURIComponent(fallbackLang)}`
-      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}`, {
+      const sessionParam = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''
+      const improveParam = '&improve_sentence=true'
+      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}`, {
         method: 'POST',
         body: formData,
       })
@@ -301,13 +313,18 @@ export function useApi() {
         const data = await res.json()
         // If backend says transcript is not valid for target language, treat as empty.
         const text = data.valid_for_target === false ? '' : data.transcript
-        return { text, detectedLanguage: data.detected_language, validForTarget: data.valid_for_target }
+        return { 
+          text, 
+          detectedLanguage: data.detected_language, 
+          validForTarget: data.valid_for_target,
+          improvement: data.improvement // Includes improved sentence, confidence, etc.
+        }
       }
     } catch (err) {
       console.error('Transcription error:', err)
     }
     return null
-  }, [targetLanguage])
+  }, [targetLanguage, sessionId])
 
   // Get AI response (streaming)
   const getAiResponse = useCallback(async (transcript: string, detectedLanguage?: string | null): Promise<string | null> => {

@@ -34,7 +34,8 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const silenceStartRef = useRef<number>(0)
   const animationFrameRef = useRef<number>(0)
   const speechDurationRef = useRef<number>(0)
-  const mimeTypeRef = useRef<string>('audio/webm')
+  // Safari/WKWebView often doesn't support audio/webm; prefer mp4/m4a when available.
+  const mimeTypeRef = useRef<string>('audio/mp4')
   
   // Use refs to avoid stale closures in the animation loop
   const silenceThresholdRef = useRef(silenceThreshold)
@@ -88,12 +89,31 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       source.connect(analyserRef.current)
 
       // Setup media recorder
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm'
+      const pickMimeType = () => {
+        const candidates = [
+          // Safari / iOS (usually produces .m4a container via audio/mp4)
+          'audio/mp4;codecs=mp4a.40.2',
+          'audio/mp4',
+          // Chromium
+          'audio/webm;codecs=opus',
+          'audio/webm',
+        ]
+        for (const c of candidates) {
+          try {
+            if (MediaRecorder.isTypeSupported(c)) return c
+          } catch {
+            // ignore
+          }
+        }
+        return '' // let browser pick default
+      }
+
+      const mimeType = pickMimeType()
       
       mimeTypeRef.current = mimeType
-      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType })
+      mediaRecorderRef.current = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
       chunksRef.current = []
 
       mediaRecorderRef.current.ondataavailable = (e) => {

@@ -893,10 +893,18 @@ async def transcribe_audio(
     """
     try:
         audio_data = await audio.read()
+
+        # Preserve the real upload metadata (critical for Safari/WKWebView which often records audio/mp4).
+        upload_filename = (getattr(audio, "filename", None) or "").strip() or "audio"
+        upload_content_type = (getattr(audio, "content_type", None) or "").strip() or "application/octet-stream"
         
         # Check if audio file is empty or too small (likely recording issue)
         if not audio_data or len(audio_data) < 100:
-            print(f"[TRANSCRIBE] ERROR: Audio file is empty or too small ({len(audio_data) if audio_data else 0} bytes)")
+            print(
+                f"[TRANSCRIBE] ERROR: Audio file is empty or too small "
+                f"({len(audio_data) if audio_data else 0} bytes) "
+                f"filename={upload_filename!r} content_type={upload_content_type!r}"
+            )
             return {
                 "transcript": "",
                 "detected_language": None,
@@ -909,7 +917,12 @@ async def transcribe_audio(
         fallback_code = normalize_lang_code(fallback_language)
         use_fallback = bool(fallback_code) and is_supported_language_code(fallback_code)
         
-        print(f"[TRANSCRIBE] Request: language={language}, hint={hint!r} -> hint_code={hint_code}, use_hint={use_hint}, audio_size={len(audio_data)} bytes")
+        print(
+            f"[TRANSCRIBE] Request: language={language}, hint={hint!r} -> "
+            f"hint_code={hint_code}, use_hint={use_hint}, "
+            f"audio_size={len(audio_data)} bytes, "
+            f"filename={upload_filename!r}, content_type={upload_content_type!r}"
+        )
 
         # Heuristic: if we *hinted* a Latin-script language (nl/fr/de/etc) but Whisper returns
         # a clearly non‑Latin script (e.g. Devanagari), retry once without a hint.
@@ -940,7 +953,8 @@ async def transcribe_audio(
         async def _transcribe_once(language_hint: Optional[str]) -> tuple[str, Optional[str], Optional[str]]:
             kwargs = {
                 "model": "whisper-1",
-                "file": ("audio.webm", audio_data, "audio/webm"),
+                # IMPORTANT: pass through the actual recorded format (e.g. audio/mp4 from Safari).
+                "file": (upload_filename, audio_data, upload_content_type),
                 "response_format": "verbose_json",
             }
             if language_hint:
