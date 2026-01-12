@@ -15,7 +15,7 @@ from typing import Optional, AsyncGenerator, List
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -704,19 +704,192 @@ async def get_user_stats(user_id: str):
         "completed_today": completed_today
     }
 
+# ============ Sentence Matching and Improvement ============
+
+async def improve_and_match_sentence(
+    transcript: str,
+    target_language: str,
+    session: Optional[dict] = None,
+    raw_transcript: Optional[str] = None
+) -> dict:
+    """
+    Intelligently match unclear transcripts to plausible sentences and improve them.
+    
+    Uses conversation context to understand what the user likely meant to say,
+    even if the audio was unclear or garbled. Makes a judgment call and improves
+    the sentence to be more natural and correct.
+    
+    Args:
+        transcript: The transcribed text (may be unclear/garbled)
+        target_language: The target language code
+        session: Optional session dict with conversation context
+        raw_transcript: Optional original raw transcript for comparison
+    
+    Returns:
+        dict with:
+            - improved: str - The improved/interpreted sentence
+            - confidence: float - Confidence level (0.0 to 1.0)
+            - original: str - Original transcript
+            - matched_to_context: bool - Whether it was matched to conversation context
+    """
+    if not transcript or not transcript.strip():
+        return {
+            "improved": "",
+            "confidence": 0.0,
+            "original": transcript or "",
+            "matched_to_context": False
+        }
+    
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    
+    # Get conversation context if available
+    conversation_context = ""
+    last_ai_message = ""
+    recent_user_messages = []
+    topic = "random"
+    
+    if session:
+        messages = session.get("messages", [])
+        # Get last AI message
+        for m in reversed(messages):
+            if m.get("role") == "assistant" and (m.get("content") or "").strip():
+                last_ai_message = (m.get("content") or "").strip()
+                break
+        
+        # Get last few user messages for context
+        user_msgs = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        recent_user_messages = user_msgs[-3:] if len(user_msgs) > 0 else []
+        
+        topic = session.get("topic", "random") or "random"
+        topic_hint = TOPIC_CONTEXT.get(topic, TOPIC_CONTEXT["random"])
+        conversation_context = f"Topic: {topic_hint}\n"
+        
+        if last_ai_message:
+            conversation_context += f"Last AI message: {last_ai_message}\n"
+        if recent_user_messages:
+            conversation_context += f"Recent user messages: {' | '.join(recent_user_messages)}\n"
+    
+    learner_level = session.get("learner_level", "beginner") if session else "beginner"
+    
+    try:
+        system_prompt = f"""You are an intelligent sentence interpreter for a language learning app.
+
+TASK: Take an unclear or garbled transcript and determine what the user likely meant to say,
+then improve it to be a natural, correct sentence in {target_name}.
+
+CONTEXT AWARENESS:
+- Use conversation context to understand what makes sense given the current topic and flow
+- Match the transcript to plausible sentences that would fit the conversation
+- Even if the audio was unclear, make your best judgment about the intended meaning
+
+LEARNER CONSIDERATIONS:
+- The user is a {learner_level} learner - be forgiving of pronunciation issues
+- Speech transcription may contain errors due to unclear audio or accent
+- Infer intent generously - prefer meaningful interpretation over literal words
+- Never assume the user said something strange on purpose
+
+IMPROVEMENT RULES:
+1. If the transcript is already clear and correct, improve it minimally (just naturalize phrasing)
+2. If the transcript is unclear but context suggests a meaning, interpret and improve it
+3. If the transcript is garbled but sounds similar to common phrases, match to a plausible sentence
+4. Always output in {target_name} using native script (Devanagari for Hindi, Hanzi for Chinese, etc.)
+5. Make the sentence natural and idiomatic, but keep it simple for language learners
+
+Return JSON only:
+{{
+    "improved": "The improved, natural sentence in {target_name}",
+    "confidence": 0.0-1.0,
+    "matched_to_context": true/false,
+    "reasoning": "Brief explanation of what you matched/improved (for debugging)"
+}}
+
+Confidence guide:
+- 0.9-1.0: Clear match, transcript was mostly correct or clearly interpretable
+- 0.7-0.9: Good match, context strongly suggests this meaning
+- 0.5-0.7: Reasonable guess based on context and similarity
+- 0.3-0.5: Low confidence, but best guess from available clues
+- <0.3: Very unclear, but still provide an improved version"""
+        
+        user_content = {
+            "transcript": transcript,
+            "raw_transcript": raw_transcript or transcript,
+            "conversation_context": conversation_context.strip() if conversation_context else "No context available",
+            "target_language": target_name
+        }
+        
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(user_content, ensure_ascii=False)
+                }
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=300,
+            temperature=0.3  # Lower temperature for more consistent matching
+        )
+        
+        result = json.loads(response.choices[0].message.content or "{}")
+        
+        improved = (result.get("improved") or "").strip()
+        confidence = float(result.get("confidence", 0.5))
+        matched = bool(result.get("matched_to_context", False))
+        reasoning = result.get("reasoning", "")
+        
+        # Safety fallback
+        if not improved:
+            improved = transcript.strip()
+            confidence = 0.3
+        
+        # Ensure improved sentence is in target language
+        if improved and target_language != "en":
+            improved = await ensure_target_language(improved, target_language)
+        
+        print(f"[SENTENCE MATCH] transcript={transcript[:60]!r} -> improved={improved[:60]!r} confidence={confidence:.2f} reasoning={reasoning[:80]!r}")
+        
+        return {
+            "improved": improved,
+            "confidence": confidence,
+            "original": transcript,
+            "matched_to_context": matched
+        }
+        
+    except Exception as e:
+        print(f"[SENTENCE MATCH] Error: {e}")
+        # Fallback to original transcript
+        return {
+            "improved": transcript.strip(),
+            "confidence": 0.3,
+            "original": transcript,
+            "matched_to_context": False
+        }
+
 # ============ Streaming Endpoints ============
 
 @app.post("/api/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
-    language: str = "es",
-    hint: Optional[str] = None,
-    fallback_language: Optional[str] = None
+    language: str = Query("es"),
+    hint: Optional[str] = Query(None),
+    fallback_language: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+    improve_sentence: bool = Query(True)
 ):
     """
     Transcribe audio using Whisper with two-pass strategy:
     1. First try with target language hint (if provided)
     2. If result is garbled, retry with fallback language (user's preferred language, usually English)
+    3. Optionally match and improve unclear sentences using conversation context
+    
+    Args:
+        audio: Audio file to transcribe
+        language: Default language code
+        hint: Language hint for transcription
+        fallback_language: Fallback language if hint fails
+        session_id: Optional session ID for conversation context-based sentence matching
+        improve_sentence: Whether to use intelligent sentence matching and improvement (default: True)
     """
     try:
         audio_data = await audio.read()
@@ -781,6 +954,13 @@ async def transcribe_audio(
             # Check if transcript is clearly NOT in the target language
             is_wrong_language = False
             
+            # First check: Whisper's detected language should match the forced language
+            if detected:
+                detected_normalized = normalize_lang_code(detected)
+                if detected_normalized and detected_normalized != hint_code:
+                    is_wrong_language = True
+                    print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but Whisper detected {detected_normalized}: {text[:80]!r}")
+            
             # For Latin-script languages: check if it looks like English when we forced Dutch/French/etc
             if hint_code in latin_langs and hint_code != "en":
                 if looks_like_english(text):
@@ -816,12 +996,15 @@ async def transcribe_audio(
                 print(f"[TRANSCRIBE] Retrying with auto-detect (forced {hint_code} failed)")
                 text2, detected2, used_hint2 = await _transcribe_once(None)
                 # Only use auto-detect result if it's actually in the target language
-                if text2 and likely_in_target_language(text2, hint_code):
+                # Check both text content and detected language match
+                detected2_normalized = normalize_lang_code(detected2) if detected2 else None
+                if text2 and likely_in_target_language(text2, hint_code) and (detected2_normalized == hint_code or not detected2_normalized):
                     text, detected, used_hint = text2, detected2, None
-                    print(f"[TRANSCRIBE] Auto-detect succeeded: {text[:80]!r}")
+                    print(f"[TRANSCRIBE] Auto-detect succeeded: {text[:80]!r}, detected={detected2_normalized}")
                 else:
                     # Still wrong - return empty/error or the original (user will see it's wrong)
-                    print(f"[TRANSCRIBE] Auto-detect also failed, returning forced result anyway")
+                    print(f"[TRANSCRIBE] Auto-detect also failed (detected={detected2_normalized}, expected={hint_code}), returning empty transcript")
+                    text = ""  # Return empty instead of wrong language text
         
         # Script mismatch check (legacy, but keep for safety)
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
@@ -833,14 +1016,81 @@ async def transcribe_audio(
         # Final validity check: is this transcript plausible for the target language?
         target_code = normalize_lang_code(hint_code or language)
         is_valid = True
+        original_text = text
         if target_code and target_code in SUPPORTED_LANGUAGE_CODES:
             if not likely_in_target_language(text, target_code):
                 print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
                 is_valid = False
                 # Treat invalid as no transcript so frontend can handle it like \"no speech\"
                 text = ""
-        # verbose_json includes language + text
-        return {"transcript": text, "detected_language": detected, "used_hint": used_hint, "valid_for_target": is_valid}
+        
+        # Intelligent sentence matching and improvement
+        improved_text = text
+        improvement_result = None
+        if improve_sentence and text and text.strip() and session_id and session_id in sessions:
+            try:
+                session = sessions[session_id]
+                target_lang = session.get("target_language", target_code or language)
+                
+                # Use sentence matching to improve unclear transcripts
+                improvement_result = await improve_and_match_sentence(
+                    transcript=text,
+                    target_language=target_lang,
+                    session=session,
+                    raw_transcript=original_text
+                )
+                
+                improved_text = improvement_result.get("improved", text)
+                confidence = improvement_result.get("confidence", 0.0)
+                
+                # Always use the improved version for display to the user
+                # The improvement function intelligently matches unclear transcripts to plausible sentences
+                # and makes judgment calls to improve them, so we trust its output
+                original_for_display = text
+                
+                if improved_text and improved_text.strip():
+                    text = improved_text  # Always use improved version for what user sees
+                    if text.strip() != original_for_display.strip():
+                        print(f"[TRANSCRIBE] Showing corrected version to user: {text[:80]!r} (confidence: {confidence:.2f}, original heard: {original_for_display[:80]!r})")
+                    else:
+                        print(f"[TRANSCRIBE] Improved version matches original: {text[:80]!r} (confidence: {confidence:.2f})")
+                else:
+                    print(f"[TRANSCRIBE] No improvement available, using original: {text[:80]!r}")
+                    
+            except Exception as e:
+                print(f"[TRANSCRIBE] Sentence improvement failed: {e}")
+                # Continue with original transcript
+        
+        # Build response
+        response = {
+            "transcript": text,
+            "detected_language": detected,
+            "used_hint": used_hint,
+            "valid_for_target": is_valid
+        }
+        
+        # Include improvement info if available and different from original
+        if improvement_result:
+            original_for_info = improvement_result.get("original", original_text)
+            # Only include improvement info if there was a meaningful change
+            if improved_text and improved_text.strip() != original_for_info.strip():
+                response["improvement"] = {
+                    "improved": improved_text if improved_text else text,
+                    "original": original_for_info,
+                    "confidence": improvement_result.get("confidence", 0.0),
+                    "matched_to_context": improvement_result.get("matched_to_context", False),
+                    "was_corrected": True
+                }
+            else:
+                response["improvement"] = {
+                    "improved": text,
+                    "original": original_for_info,
+                    "confidence": improvement_result.get("confidence", 0.0),
+                    "matched_to_context": False,
+                    "was_corrected": False
+                }
+        
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
