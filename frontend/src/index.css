@@ -20,21 +20,12 @@ html, body, #root {
 
 body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  background: #1c1917;
+  background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
   color: #fafafa;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   touch-action: manipulation;
-  /* iOS safe area support */
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
-}
-
-#root {
-  background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
 }
 
 /* Disable pull-to-refresh on mobile */

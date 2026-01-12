@@ -592,10 +592,10 @@ export function ConversationScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col relative z-10"
+      className="h-full flex flex-col items-center relative z-10"
     >
       {/* Header */}
-      <div className="flex-shrink-0 w-full flex items-center justify-between px-4 py-3 bg-[#1c1917]">
+      <div className="w-full flex items-center justify-between p-4 pt-6">
         <button
           onClick={(e) => {
             e.stopPropagation()
