@@ -11,13 +11,15 @@ const config: CapacitorConfig = {
     cleartext: true, // Allow HTTP for development
   },
   ios: {
-    contentInset: 'automatic',
+    contentInset: 'always',
     scrollEnabled: true,
+    backgroundColor: '#1c1917',
   },
   plugins: {
     StatusBar: {
-      style: 'dark',
+      style: 'LIGHT',
       backgroundColor: '#1c1917',
+      overlaysWebView: true,
     },
   },
 };
