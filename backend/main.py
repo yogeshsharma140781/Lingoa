@@ -1041,16 +1041,12 @@ async def transcribe_audio(
                     text, detected, used_hint = text2, detected2, None
                     print(f"[TRANSCRIBE] Auto-detect succeeded: {text[:80]!r}, detected={detected2_normalized}")
                 else:
-                    # Still wrong - but if text doesn't look like English, maybe accept it anyway
-                    # (Whisper might have gotten it right even if detected language is off)
-                    if text2 and hint_code != "en" and not looks_like_english(text2):
-                        text, detected, used_hint = text2, detected2, None
-                        print(f"[TRANSCRIBE] Auto-detect: accepting text that doesn't look like English: {text[:80]!r}, detected={detected2_normalized}")
-                    else:
-                        print(f"[TRANSCRIBE] Auto-detect also failed (detected={detected2_normalized}, expected={hint_code}), returning empty transcript")
-                        text = ""  # Return empty instead of wrong language text
-                        # Mark as invalid so frontend knows this is a rejection, not just empty audio
-                        is_valid = False
+                    # Auto-detect retry failed - return empty
+                    # Trust Whisper's detected language rather than text content analysis
+                    print(f"[TRANSCRIBE] Auto-detect also failed (detected={detected2_normalized}, expected={hint_code}), returning empty transcript")
+                    text = ""  # Return empty instead of wrong language text
+                    # Mark as invalid so frontend knows this is a rejection, not just empty audio
+                    is_valid = False
         
         # Script mismatch check (legacy, but keep for safety)
         # Only check for script mismatch if we forced a non-Latin language (Hindi, Chinese, etc.)
@@ -1638,10 +1634,9 @@ def force_translation_needed(transcript: str, target_language: str) -> bool:
     if not t:
         return False
 
-    # If learning a non-English language and user clearly speaks English
-    if target_language != "en" and looks_like_english(t):
-        return True
-
+    # Removed automatic English detection - rely on explicit translation requests only
+    # (User can still ask "How do you say..." explicitly)
+    
     # Script mismatches for non-Latin languages
     if target_language == "hi" and not re.search(r"[\u0900-\u097F]", t):
         return True
@@ -1716,9 +1711,8 @@ def detect_translation_intent(transcript: str, target_language: str) -> bool:
     if any(m in t for m in explicit_markers) and ("say" in t or "in " in t):
         return True
 
-    # If target is not English and user speaks English, treat as translation assist
-    if target_language != "en" and looks_like_english(transcript):
-        return True
+    # Removed automatic English detection - rely on explicit translation requests only
+    # (User can still ask "How do you say..." explicitly)
 
     # If target is English and user uses Devanagari (Hindi), treat as translation assist
     if target_language == "en" and re.search(r"[\u0900-\u097F]", transcript):
@@ -1747,12 +1741,12 @@ def likely_in_target_language(text: str, target_language: str) -> bool:
     if target_language == "ko":
         return bool(re.search(r"[\uAC00-\uD7AF]", t))
     if target_language == "en":
+        # Validate that English text is actually English
         return looks_like_english(t)
 
     # Latin-script target languages (es/fr/de/nl/it/pt):
-    # Treat clear English as "not target"; otherwise allow.
-    if looks_like_english(t):
-        return False
+    # Trust Whisper's transcription - don't reject based on English detection
+    # (Removed looks_like_english check - trust the forced language)
     return True
 
 def looks_garbled_transcript(text: str, target_language: str) -> bool:
@@ -1968,11 +1962,8 @@ async def check_user_repeated_translation(user_text: str, target_language: str, 
             if overlap < min_overlap:
                 return False
 
-    # Deterministic guardrails: do NOT clear pending translation if the user is clearly not speaking
-    # in the target language. This prevents the flow from progressing when the user keeps speaking English.
-    # (Kept for clarity, but force_translation_needed above already covers these.)
-    if target_language != "en" and looks_like_english(user_text):
-        return False
+    # Removed automatic English detection - rely on explicit translation requests only
+    # (User can still ask "How do you say..." explicitly)
 
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")
     try:
