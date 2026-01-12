@@ -595,7 +595,12 @@ export function ConversationScreen() {
       className="h-full flex flex-col items-center relative z-10"
     >
       {/* Header */}
-      <div className="w-full flex items-center justify-between p-4 pt-6">
+      <div
+        className={`w-full flex items-center justify-between p-4 ${
+          // iOS notch / Dynamic Island needs more top padding so controls don't render under the status bar
+          isNativeIos ? 'pt-14' : 'pt-6'
+        }`}
+      >
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -676,9 +681,9 @@ export function ConversationScreen() {
       </AnimatePresence>
 
       {/* Main scrollable content area */}
-      <div className="flex-1 flex flex-col w-full px-4 overflow-y-auto">
+      <div className="flex-1 flex flex-col w-full px-4 min-h-0">
         {/* Chat History */}
-        <div className="flex-1 w-full overflow-y-auto px-2 py-2">
+        <div className="flex-1 w-full overflow-y-auto px-2 py-2 min-h-0">
           <div className="space-y-3">
             {conversationHistory.map((msg, idx) => (
               <motion.div
@@ -776,7 +781,12 @@ export function ConversationScreen() {
       </div>
 
       {/* Bottom fixed area: Status + Done button + Timer */}
-      <div className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8">
+      <div
+        className={`flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 ${
+          // Extra bottom breathing room on iOS so it doesn't hug the home indicator area
+          isNativeIos ? 'pb-12' : 'pb-8'
+        }`}
+      >
         {/* Status indicator + Done button row */}
         <div className="flex items-center justify-center gap-4 mb-4">
           {/* Subtle status indicator */}
