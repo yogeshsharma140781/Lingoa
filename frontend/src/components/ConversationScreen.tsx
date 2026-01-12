@@ -595,7 +595,10 @@ export function ConversationScreen() {
       className="h-full flex flex-col relative z-10"
     >
       {/* Header - fixed at top with safe area */}
-      <div className="flex-shrink-0 w-full flex items-center justify-between p-4 pt-12 bg-[#1c1917]">
+      <div 
+        className="flex-shrink-0 w-full flex items-center justify-between px-4 pb-2 bg-[#1c1917]"
+        style={{ paddingTop: 'max(16px, calc(env(safe-area-inset-top, 0px) + 8px))' }}
+      >
         <button
           onClick={(e) => {
             e.stopPropagation()
