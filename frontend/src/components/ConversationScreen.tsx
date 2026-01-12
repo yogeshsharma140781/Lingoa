@@ -592,14 +592,19 @@ export function ConversationScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center relative z-10"
+      // Use h-screen for iOS/WKWebView reliability (100% height can be wrong).
+      className="h-screen flex flex-col items-center relative z-10"
     >
       {/* Header */}
       <div
-        className={`w-full flex items-center justify-between p-4 ${
-          // iOS notch / Dynamic Island needs more top padding so controls don't render under the status bar
-          isNativeIos ? 'pt-14' : 'pt-6'
-        }`}
+        className="w-full flex items-center justify-between p-4"
+        style={{
+          // Ensure header sits below the notch/status bar on iOS.
+          // env() will be 0 on platforms that don't support it.
+          paddingTop: isNativeIos
+            ? 'calc(24px + env(safe-area-inset-top, 0px))'
+            : undefined,
+        }}
       >
         <button
           onClick={(e) => {
@@ -782,10 +787,13 @@ export function ConversationScreen() {
 
       {/* Bottom fixed area: Status + Done button + Timer */}
       <div
-        className={`flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 ${
-          // Extra bottom breathing room on iOS so it doesn't hug the home indicator area
-          isNativeIos ? 'pb-12' : 'pb-8'
-        }`}
+        className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8"
+        style={{
+          // Keep controls above the home indicator on iOS.
+          paddingBottom: isNativeIos
+            ? 'calc(16px + env(safe-area-inset-bottom, 0px))'
+            : undefined,
+        }}
       >
         {/* Status indicator + Done button row */}
         <div className="flex items-center justify-center gap-4 mb-4">
