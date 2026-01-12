@@ -260,7 +260,9 @@ export function ConversationScreen() {
     setCurrentYouMeant(null)
     
     // Stop recording and wait for MediaRecorder to flush final chunk (Safari/WKWebView needs this)
+    console.log('[handleDone] Calling stopRecordingAndGetBlob...')
     const blob = await stopRecordingAndGetBlob()
+    console.log('[handleDone] Got blob:', blob?.size, 'bytes, type:', blob?.type)
     
     if (blob && blob.size > 0) {
       try {
@@ -315,6 +317,7 @@ export function ConversationScreen() {
             await textToSpeech(response)
           }
         } else {
+          console.warn('[handleDone] No speech detected in transcription result:', transcription)
           setUserTranscript('(No speech detected)')
           await new Promise(r => setTimeout(r, 1000))
           setUserTranscript('')
@@ -324,6 +327,7 @@ export function ConversationScreen() {
         setUserTranscript('')
       }
     } else {
+      console.warn('[handleDone] No audio blob or empty blob:', blob?.size, 'bytes')
       setUserTranscript('(No audio recorded)')
       await new Promise(r => setTimeout(r, 1000))
       setUserTranscript('')

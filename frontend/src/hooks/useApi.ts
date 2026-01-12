@@ -286,6 +286,13 @@ export function useApi() {
     languageHint?: string | null
   ): Promise<{ text: string; detectedLanguage?: string | null; validForTarget?: boolean; improvement?: any } | null> => {
     try {
+      console.log('[transcribeAudio] Called with blob:', audioBlob?.size, 'bytes, type:', audioBlob?.type)
+      
+      if (!audioBlob || audioBlob.size === 0) {
+        console.error('[transcribeAudio] ERROR: Blob is empty or null!')
+        return null
+      }
+
       const formData = new FormData()
       // Use a filename that matches the actual mimeType.
       // Whisper accepts webm, mp4, m4a, wav, mp3, etc.
@@ -296,6 +303,7 @@ export function useApi() {
         ct.includes('audio/wav') ? 'audio.wav' :
         ct.includes('audio/mpeg') ? 'audio.mp3' :
         'audio.webm'
+      console.log('[transcribeAudio] Using filename:', filename, 'for content-type:', ct)
       formData.append('audio', audioBlob, filename)
 
       // Default fallback to English (most users learning other languages speak English natively)

@@ -109,20 +109,30 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       }
 
       const mimeType = pickMimeType()
+      console.log('[Recorder] Selected mimeType:', mimeType || '(browser default)')
       
-      mimeTypeRef.current = mimeType
+      mimeTypeRef.current = mimeType || 'audio/webm' // fallback for blob type
       mediaRecorderRef.current = mimeType
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream)
       chunksRef.current = []
 
+      // Log actual mimeType the recorder is using
+      console.log('[Recorder] Actual recorder mimeType:', mediaRecorderRef.current.mimeType)
+
       mediaRecorderRef.current.ondataavailable = (e) => {
+        console.log('[Recorder] ondataavailable:', e.data.size, 'bytes')
         if (e.data.size > 0) {
           chunksRef.current.push(e.data)
         }
       }
 
+      mediaRecorderRef.current.onerror = (e) => {
+        console.error('[Recorder] onerror:', e)
+      }
+
       // Start recording immediately
+      console.log('[Recorder] Starting recording...')
       mediaRecorderRef.current.start(500)
 
       // Start analyzing
@@ -183,11 +193,16 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     const recorder = mediaRecorderRef.current
 
     const buildBlob = () => {
+      console.log('[Recorder] buildBlob: chunks count =', chunksRef.current.length)
       if (chunksRef.current.length > 0) {
+        const totalSize = chunksRef.current.reduce((acc, c) => acc + c.size, 0)
+        console.log('[Recorder] buildBlob: total chunk bytes =', totalSize)
         const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current })
+        console.log('[Recorder] buildBlob: final blob size =', blob.size, 'type =', blob.type)
         chunksRef.current = []
         return blob
       }
+      console.warn('[Recorder] buildBlob: NO CHUNKS!')
       return null
     }
 
