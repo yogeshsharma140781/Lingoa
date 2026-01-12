@@ -955,13 +955,21 @@ async def transcribe_audio(
             is_wrong_language = False
             
             # First check: Whisper's detected language should match the forced language
-            # This is the most reliable check - if Whisper detected a different language, reject it
-            # Especially important: if we forced Dutch/German/etc and Whisper detected English, reject it
+            # Only reject if it's clearly wrong (e.g., English when we forced Dutch)
+            # Be lenient with similar languages (e.g., Dutch vs German) since they can be confused
             if detected:
                 detected_normalized = normalize_lang_code(detected)
                 if detected_normalized and detected_normalized != hint_code:
-                    is_wrong_language = True
-                    print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but Whisper detected {detected_normalized}: {text[:80]!r}")
+                    # Only reject if it's clearly wrong - English when learning another language, or completely different script
+                    if hint_code != "en" and detected_normalized == "en":
+                        is_wrong_language = True
+                        print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but Whisper detected English: {text[:80]!r}")
+                    elif hint_code in {"hi", "zh", "ja", "ko"} and detected_normalized not in {"hi", "zh", "ja", "ko"}:
+                        # Script mismatch for non-Latin languages
+                        is_wrong_language = True
+                        print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but Whisper detected {detected_normalized} (script mismatch): {text[:80]!r}")
+                    # For similar Latin languages (nl/de, es/pt, etc.), be lenient - don't reject
+                    # Whisper can confuse similar languages, but the text is likely still valid
             
             # For Latin-script languages: check if it looks like English when we forced Dutch/French/etc
             # This catches cases where Whisper might not return detected language but still transcribes in English
@@ -1002,13 +1010,24 @@ async def transcribe_audio(
                 # Only use auto-detect result if it's actually in the target language
                 # Check both text content and detected language match
                 detected2_normalized = normalize_lang_code(detected2) if detected2 else None
-                if text2 and likely_in_target_language(text2, hint_code) and (detected2_normalized == hint_code or not detected2_normalized):
+                # Be lenient: accept if text is valid for target language, even if detected language is slightly off
+                # Only reject if it's clearly wrong (English when we want Dutch, or wrong script)
+                text_is_valid = likely_in_target_language(text2, hint_code)
+                detected_is_valid = (detected2_normalized == hint_code or not detected2_normalized or 
+                                   (hint_code in latin_langs and detected2_normalized in latin_langs and detected2_normalized != "en"))
+                
+                if text2 and text_is_valid and (detected_is_valid or not detected2_normalized):
                     text, detected, used_hint = text2, detected2, None
                     print(f"[TRANSCRIBE] Auto-detect succeeded: {text[:80]!r}, detected={detected2_normalized}")
                 else:
-                    # Still wrong - return empty/error or the original (user will see it's wrong)
-                    print(f"[TRANSCRIBE] Auto-detect also failed (detected={detected2_normalized}, expected={hint_code}), returning empty transcript")
-                    text = ""  # Return empty instead of wrong language text
+                    # Still wrong - but if text doesn't look like English, maybe accept it anyway
+                    # (Whisper might have gotten it right even if detected language is off)
+                    if text2 and hint_code != "en" and not looks_like_english(text2):
+                        text, detected, used_hint = text2, detected2, None
+                        print(f"[TRANSCRIBE] Auto-detect: accepting text that doesn't look like English: {text[:80]!r}, detected={detected2_normalized}")
+                    else:
+                        print(f"[TRANSCRIBE] Auto-detect also failed (detected={detected2_normalized}, expected={hint_code}), returning empty transcript")
+                        text = ""  # Return empty instead of wrong language text
         
         # Script mismatch check (legacy, but keep for safety)
         if use_hint and hint_code in latin_langs and _looks_like_wrong_script_for_latin(text):
@@ -1029,22 +1048,32 @@ async def transcribe_audio(
         is_valid = True
         original_text = text
         if target_code and target_code in SUPPORTED_LANGUAGE_CODES:
-            # Check detected language first - this is the most reliable indicator
-            if detected:
-                detected_normalized = normalize_lang_code(detected)
-                if detected_normalized and detected_normalized != target_code:
-                    print(f"[TRANSCRIBE] INVALID: Expected {target_code} but detected {detected_normalized}: {text[:80]!r}")
+            # When we forced a language, be more lenient - if text doesn't look like English, accept it
+            # Only strictly check detected language when we didn't force it (auto-detect mode)
+            if use_hint and hint_code:
+                # We forced the language, so be lenient: only reject if it clearly looks like English
+                if hint_code != "en" and looks_like_english(text):
+                    print(f"[TRANSCRIBE] INVALID: Forced {target_code} but text looks like English: {text[:80]!r}")
                     is_valid = False
                     text = ""
+                # Otherwise, trust that forcing the language worked
+            else:
+                # Auto-detect mode: check detected language more strictly
+                if detected:
+                    detected_normalized = normalize_lang_code(detected)
+                    if detected_normalized and detected_normalized != target_code:
+                        print(f"[TRANSCRIBE] INVALID: Expected {target_code} but detected {detected_normalized}: {text[:80]!r}")
+                        is_valid = False
+                        text = ""
+                    elif not likely_in_target_language(text, target_code):
+                        print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
+                        is_valid = False
+                        text = ""
                 elif not likely_in_target_language(text, target_code):
                     print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
                     is_valid = False
+                    # Treat invalid as no transcript so frontend can handle it like \"no speech\"
                     text = ""
-            elif not likely_in_target_language(text, target_code):
-                print(f"[TRANSCRIBE] INVALID for target={target_code}: {text[:80]!r}")
-                is_valid = False
-                # Treat invalid as no transcript so frontend can handle it like \"no speech\"
-                text = ""
         
         # Intelligent sentence matching and improvement
         improved_text = text
