@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Capacitor } from '@capacitor/core'
-import { X, Volume2, Gauge, MicOff, Mic, Send, Loader2, VolumeX } from 'lucide-react'
+import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX } from 'lucide-react'
 import { useStore } from '../store'
 import { useApi, unlockAudio } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
@@ -21,7 +21,6 @@ export function ConversationScreen() {
     incrementSpeakingTime,
     isSpeaking,
     isAiSpeaking,
-    aiMessage,
     clearAiMessage,
     audioSpeed,
     setAudioSpeed,
@@ -593,10 +592,10 @@ export function ConversationScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center relative z-10"
+      className="h-full flex flex-col relative z-10"
     >
-      {/* Header */}
-      <div className="w-full flex items-center justify-between p-4 pt-6">
+      {/* Header - fixed at top with safe area */}
+      <div className="flex-shrink-0 w-full flex items-center justify-between p-4 pt-12 bg-[#1c1917]">
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -676,112 +675,47 @@ export function ConversationScreen() {
         )}
       </AnimatePresence>
 
-      {/* Main speaking area */}
-      <div className="flex-1 flex flex-col items-center justify-start w-full px-6 overflow-y-auto pt-4">
-        {/* Chat History - Scrollable */}
-        {conversationHistory.length > 0 && (
-          <div className="w-full mb-4 max-h-72 overflow-y-auto px-2">
-            <div className="space-y-3">
-              {conversationHistory.map((msg, idx) => (
-                <motion.div
-                  key={idx}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+      {/* Main scrollable content area */}
+      <div className="flex-1 flex flex-col w-full px-4 overflow-y-auto">
+        {/* Chat History */}
+        <div className="flex-1 w-full overflow-y-auto px-2 py-2">
+          <div className="space-y-3">
+            {conversationHistory.map((msg, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                    msg.role === 'user'
+                      ? 'bg-primary-500 text-white'
+                      : 'bg-surface-700 text-surface-200 border border-surface-600'
+                  }`}
                 >
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                      msg.role === 'user'
-                        ? 'bg-primary-500 text-white'
-                        : 'bg-surface-700 text-surface-200 border border-surface-600'
-                    }`}
-                  >
-                    <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
-                  </div>
-                </motion.div>
-              ))}
-              {/* Auto-scroll anchor */}
-              <div ref={chatEndRef} />
-            </div>
+                  <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
+                </div>
+              </motion.div>
+            ))}
+            {/* Auto-scroll anchor */}
+            <div ref={chatEndRef} />
           </div>
-        )}
-        {/* Subtle status indicator */}
-        <motion.div 
-          className={`flex items-center gap-2 px-4 py-2 rounded-full mb-4 ${
-            isWaitingForUser && !isAiSpeaking && !isProcessing
-              ? 'bg-primary-500/20 border border-primary-500/30'
-              : isAiSpeaking
-              ? 'bg-accent-500/20 border border-accent-500/30'
-              : isProcessing
-              ? 'bg-yellow-500/20 border border-yellow-500/30'
-              : 'bg-surface-700/50 border border-surface-600'
-          }`}
-          animate={{
-            scale: isSpeaking && !isProcessing ? 1 + volume * 0.05 : 1,
-          }}
-        >
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
-              <span className="text-yellow-400 text-sm font-medium">Processing...</span>
-            </>
-          ) : isAiSpeaking ? (
-            <>
-              <div className="flex items-center gap-0.5">
-                {[...Array(4)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    className="w-1 bg-accent-400 rounded-full"
-                    animate={{ height: [8, 16, 8] }}
-                    transition={{ duration: 0.4, repeat: Infinity, delay: i * 0.1 }}
-                  />
-                ))}
-              </div>
-              <span className="text-accent-400 text-sm font-medium">AI Speaking</span>
-            </>
-          ) : isWaitingForUser ? (
-            <>
-              <div className="flex items-center gap-0.5">
-                {[...Array(4)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    className="w-1 bg-primary-400 rounded-full"
-                    animate={{ 
-                      height: isSpeaking ? [8, 14 + volume * 8, 8] : [6, 10, 6],
-                    }}
-                    transition={{ 
-                      duration: isSpeaking ? 0.2 : 0.6, 
-                      repeat: Infinity, 
-                      delay: i * 0.08 
-                    }}
-                  />
-                ))}
-              </div>
-              <span className="text-primary-400 text-sm font-medium">
-                {isSpeaking ? 'Listening...' : 'Ready'}
-              </span>
-            </>
-          ) : (
-            <>
-              <Mic className="w-4 h-4 text-surface-400" />
-              <span className="text-surface-400 text-sm">Microphone ready</span>
-            </>
-          )}
-        </motion.div>
+        </div>
 
-        {/* Status and transcript display */}
-        <div className="text-center mb-6 flex flex-col items-center justify-start pb-4">
+        {/* Cards section (translations, corrections, etc.) */}
+        <div className="flex-shrink-0 w-full px-2 pb-2">
           {/* User transcript */}
           {userTranscript && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-4"
+              className="text-center mb-3"
             >
               <span className="text-surface-500 text-xs uppercase tracking-wider">
                 {userTranscript === 'Transcribing...' ? '' : 'You said:'}
               </span>
-              <p className={`text-lg mt-1 max-w-xs ${
+              <p className={`text-base mt-1 ${
                 userTranscript === 'Transcribing...' ? 'text-yellow-400' : 'text-white'
               }`}>
                 {userTranscript === 'Transcribing...' ? userTranscript : `"${userTranscript}"`}
@@ -789,12 +723,11 @@ export function ConversationScreen() {
             </motion.div>
           )}
           
-          {/* Inline Correction */}
           {currentTranslation && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-4 w-full max-w-sm"
+              className="mb-3"
             >
               <TranslationCard translation={currentTranslation} />
             </motion.div>
@@ -804,7 +737,7 @@ export function ConversationScreen() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-4 w-full max-w-sm"
+              className="mb-3"
             >
               <YouMeantCard text={currentYouMeant} />
             </motion.div>
@@ -814,50 +747,20 @@ export function ConversationScreen() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-4 w-full max-w-sm"
+              className="mb-3"
             >
               <CorrectionCard 
                 correction={currentCorrection} 
-                onDismiss={() => {
-                  clearCorrection()
-                }}
+                onDismiss={() => clearCorrection()}
                 onExpandChange={handleCorrectionExpandChange}
               />
             </motion.div>
           )}
 
-          {/* Last AI text (keep visible even during user's turn) */}
-          {aiMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <Volume2 className={`w-5 h-5 ${isAiSpeaking ? 'text-accent-400' : 'text-surface-400'}`} />
-                <span className={`${isAiSpeaking ? 'text-accent-400' : 'text-surface-400'} font-medium`}>
-                  {isAiSpeaking ? 'AI is speaking' : 'AI asked'}
-                </span>
-              </div>
-              <p className="text-surface-300 text-lg max-w-xs">
-                {aiMessage}
-              </p>
-            </motion.div>
-          )}
-
-
-          {/* Starting */}
-          {!isInitialized && !startError && (
-            <span className="text-surface-400">
-              Starting conversation...
-            </span>
-          )}
-          
           {/* Error */}
           {startError && (
-            <div className="text-center space-y-3">
-              <span className="text-red-400 block">
-                {startError}
-              </span>
+            <div className="text-center space-y-3 mb-3">
+              <span className="text-red-400 block text-sm">{startError}</span>
               <button
                 onClick={() => {
                   setStartError(null)
@@ -870,25 +773,92 @@ export function ConversationScreen() {
             </div>
           )}
         </div>
-
-        {/* Done button - only show when waiting for user and not processing */}
-        {isWaitingForUser && !isAiSpeaking && !isProcessing && (
-          <motion.button
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            onClick={handleDone}
-            className="flex items-center gap-2 btn-primary rounded-full px-10 py-4 font-semibold text-lg text-white shadow-lg"
-          >
-            <Send className="w-5 h-5" />
-            Done
-          </motion.button>
-        )}
       </div>
 
-      {/* Timer at bottom */}
-      <div className="w-full p-6 pb-10">
+      {/* Bottom fixed area: Status + Done button + Timer */}
+      <div className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8">
+        {/* Status indicator + Done button row */}
+        <div className="flex items-center justify-center gap-4 mb-4">
+          {/* Subtle status indicator */}
+          <motion.div 
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+              isWaitingForUser && !isAiSpeaking && !isProcessing
+                ? 'bg-primary-500/20 border border-primary-500/30'
+                : isAiSpeaking
+                ? 'bg-accent-500/20 border border-accent-500/30'
+                : isProcessing
+                ? 'bg-yellow-500/20 border border-yellow-500/30'
+                : 'bg-surface-700/50 border border-surface-600'
+            }`}
+            animate={{
+              scale: isSpeaking && !isProcessing ? 1 + volume * 0.05 : 1,
+            }}
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
+                <span className="text-yellow-400 text-sm font-medium">Processing...</span>
+              </>
+            ) : isAiSpeaking ? (
+              <>
+                <div className="flex items-center gap-0.5">
+                  {[...Array(4)].map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1 bg-accent-400 rounded-full"
+                      animate={{ height: [8, 14, 8] }}
+                      transition={{ duration: 0.4, repeat: Infinity, delay: i * 0.1 }}
+                    />
+                  ))}
+                </div>
+                <span className="text-accent-400 text-sm font-medium">AI Speaking</span>
+              </>
+            ) : isWaitingForUser ? (
+              <>
+                <div className="flex items-center gap-0.5">
+                  {[...Array(4)].map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1 bg-primary-400 rounded-full"
+                      animate={{ 
+                        height: isSpeaking ? [8, 12 + volume * 6, 8] : [6, 10, 6],
+                      }}
+                      transition={{ 
+                        duration: isSpeaking ? 0.2 : 0.6, 
+                        repeat: Infinity, 
+                        delay: i * 0.08 
+                      }}
+                    />
+                  ))}
+                </div>
+                <span className="text-primary-400 text-sm font-medium">
+                  {isSpeaking ? 'Listening...' : 'Ready'}
+                </span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-4 h-4 text-surface-400" />
+                <span className="text-surface-400 text-sm">Ready</span>
+              </>
+            )}
+          </motion.div>
+
+          {/* Done button - only show when waiting for user */}
+          {isWaitingForUser && !isAiSpeaking && !isProcessing && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              onClick={handleDone}
+              className="flex items-center gap-2 btn-primary rounded-full px-6 py-2.5 font-semibold text-white shadow-lg"
+            >
+              <Send className="w-4 h-4" />
+              Done
+            </motion.button>
+          )}
+        </div>
+
         {/* Progress bar */}
-        <div className="w-full h-2 bg-surface-800 rounded-full overflow-hidden mb-4">
+        <div className="w-full h-1.5 bg-surface-800 rounded-full overflow-hidden mb-2">
           <motion.div
             className="h-full bg-gradient-to-r from-primary-500 to-primary-400 rounded-full"
             initial={{ width: 0 }}
@@ -898,16 +868,16 @@ export function ConversationScreen() {
         </div>
 
         {/* Time display */}
-        <div className="flex items-center justify-between">
-          <span className="text-surface-400 text-sm">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-surface-400">
             {isSpeaking && !isAiSpeaking ? 'Speaking...' : 'Paused'}
           </span>
-          <span className={`font-mono text-2xl font-semibold ${
+          <span className={`font-mono text-lg font-semibold ${
             isSpeaking && !isAiSpeaking ? 'text-white' : 'text-surface-500'
           }`}>
             {minutes}:{seconds.toString().padStart(2, '0')}
           </span>
-          <span className="text-surface-400 text-sm">remaining</span>
+          <span className="text-surface-400">remaining</span>
         </div>
       </div>
 
