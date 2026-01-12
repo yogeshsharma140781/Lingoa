@@ -20,15 +20,7 @@ export default function App() {
   }, [fetchUserStats])
 
   return (
-    <div 
-      className="h-full w-full animated-gradient overflow-hidden relative"
-      style={{
-        paddingTop: 'env(safe-area-inset-top, 0px)',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        paddingLeft: 'env(safe-area-inset-left, 0px)',
-        paddingRight: 'env(safe-area-inset-right, 0px)',
-      }}
-    >
+    <div className="h-full w-full animated-gradient overflow-hidden relative">
       {/* Decorative background shapes */}
       <div className="floating-shape w-96 h-96 bg-primary-500 top-[-10%] left-[-10%] animate-float" />
       <div className="floating-shape w-80 h-80 bg-accent-500 bottom-[-15%] right-[-10%] animate-float" style={{ animationDelay: '-3s' }} />
