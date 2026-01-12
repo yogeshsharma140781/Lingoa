@@ -597,12 +597,12 @@ export function ConversationScreen() {
     >
       {/* Header */}
       <div
-        className="w-full flex items-center justify-between p-4"
+        className="w-full flex items-center justify-between p-4 bg-[#1c1917]/80 backdrop-blur-sm z-20"
         style={{
           // Ensure header sits below the notch/status bar on iOS.
           // env() will be 0 on platforms that don't support it.
           paddingTop: isNativeIos
-            ? 'calc(24px + env(safe-area-inset-top, 0px))'
+            ? 'max(44px, calc(12px + env(safe-area-inset-top, 0px)))'
             : undefined,
         }}
       >
@@ -791,7 +791,7 @@ export function ConversationScreen() {
         style={{
           // Keep controls above the home indicator on iOS.
           paddingBottom: isNativeIos
-            ? 'calc(16px + env(safe-area-inset-bottom, 0px))'
+            ? 'max(24px, calc(16px + env(safe-area-inset-bottom, 0px)))'
             : undefined,
         }}
       >
