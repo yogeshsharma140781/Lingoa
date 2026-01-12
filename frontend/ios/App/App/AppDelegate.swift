@@ -11,6 +11,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Configure audio session to play audio even in silent mode (like Music app)
         configureAudioSession()
         
+        // Set window background to dark to prevent white flashes
+        if let window = self.window {
+            window.backgroundColor = UIColor(red: 0.11, green: 0.098, blue: 0.09, alpha: 1.0) // #1c1917
+        }
+        
         return true
     }
     
