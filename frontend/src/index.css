@@ -12,33 +12,20 @@
   box-sizing: border-box;
 }
 
-html {
-  /* Background on html extends truly edge-to-edge */
-  background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
-  background-attachment: fixed;
-  min-height: 100%;
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  background: transparent;
+  background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
   color: #fafafa;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   touch-action: manipulation;
-  min-height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-#root {
-  min-height: 100%;
-  /* Content respects safe areas (doesn't go under notch/home indicator) */
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* Disable pull-to-refresh on mobile */
