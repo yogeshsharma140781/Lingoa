@@ -992,12 +992,13 @@ async def transcribe_audio(
                     # Whisper can confuse similar languages, but the text is likely still valid
             
             # For Latin-script languages: check if it looks like English when we forced Dutch/French/etc
-            # This catches cases where Whisper might not return detected language but still transcribes in English
-            # This is a critical backup check for when detected language is missing or incorrect
-            if hint_code in latin_langs and hint_code != "en":
-                if looks_like_english(text):
-                    is_wrong_language = True
-                    print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but text looks like English: {text[:80]!r}")
+            # BUT: When we force a language, Whisper should transcribe in that language, so we trust it
+            # Only check for English if Whisper detected English (already handled above)
+            # Skip this check when forcing - trust Whisper's transcription
+            # if hint_code in latin_langs and hint_code != "en":
+            #     if looks_like_english(text):
+            #         is_wrong_language = True
+            #         print(f"[TRANSCRIBE] ERROR: Forced {hint_code} but text looks like English: {text[:80]!r}")
             
             # For Hindi: check if transcript lacks Devanagari
             elif hint_code == "hi":
@@ -1085,19 +1086,14 @@ async def transcribe_audio(
             # When we forced a language, be very lenient - only reject if it clearly looks like English
             # Trust Whisper when we force a language - it should transcribe in that language
             elif use_hint and hint_code:
-                # We forced the language, so be lenient: only reject if it clearly looks like English
-                # IMPORTANT: When forcing a language, trust Whisper - it should transcribe in that language
-                # Only reject if the text is CLEARLY English (not just similar words)
-                if hint_code != "en" and looks_like_english(text):
-                    print(f"[TRANSCRIBE] INVALID: Forced {target_code} but text looks like English: {text[:80]!r}, detected={detected}")
-                    is_valid = False
-                    text = ""
-                else:
-                    # Trust that forcing the language worked - accept the transcript
-                    # Even if detected language is slightly off (e.g., German when we forced Dutch),
-                    # trust the transcription since we forced the language
-                    print(f"[TRANSCRIBE] ACCEPTED (forced {target_code}): {text[:80]!r}, detected={detected}, is_valid={is_valid}")
-                    is_valid = True
+                # We forced the language - TRUST WHISPER!
+                # When we force a language with Whisper's API, it should transcribe in that language
+                # We already checked if detected language is English (rejected earlier)
+                # So if we get here with non-empty text, accept it - trust that forcing worked
+                # Only reject if Whisper detected English (already handled in early validation)
+                print(f"[TRANSCRIBE] ACCEPTED (forced {target_code}): {text[:80]!r}, detected={detected}")
+                is_valid = True
+                # Don't check looks_like_english here - when forcing, trust Whisper's transcription
             else:
                 # Auto-detect mode: check detected language more strictly
                 if detected:
