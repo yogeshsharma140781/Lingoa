@@ -950,12 +950,69 @@ async def transcribe_audio(
         # Use Whisper auto-detect by default.
         # When the user is in the "repeat the target sentence" step, we pass hint=<target_language>
         # to prevent mis-detections like Arabic for Dutch pronunciation.
-        async def _transcribe_once(language_hint: Optional[str]) -> tuple[str, Optional[str], Optional[str]]:
+        def _extract_speech_metrics(transcription_obj) -> dict:
+            """
+            Best-effort extraction of Whisper confidence metrics from verbose_json.
+            On many silent/near-silent clips Whisper can "hallucinate" common phrases.
+            We use no_speech_prob + avg_logprob (when present) to guard against that.
+            """
+            segs = getattr(transcription_obj, "segments", None)
+            if segs is None and isinstance(transcription_obj, dict):
+                segs = transcription_obj.get("segments")
+            if not segs or not isinstance(segs, list):
+                return {}
+
+            no_speech_probs = []
+            avg_logprobs = []
+            for s in segs:
+                # segment can be a model or dict depending on client version
+                nsp = getattr(s, "no_speech_prob", None)
+                alp = getattr(s, "avg_logprob", None)
+                if isinstance(s, dict):
+                    nsp = s.get("no_speech_prob", nsp)
+                    alp = s.get("avg_logprob", alp)
+                if isinstance(nsp, (int, float)):
+                    no_speech_probs.append(float(nsp))
+                if isinstance(alp, (int, float)):
+                    avg_logprobs.append(float(alp))
+
+            out = {}
+            if no_speech_probs:
+                out["mean_no_speech_prob"] = sum(no_speech_probs) / len(no_speech_probs)
+                out["max_no_speech_prob"] = max(no_speech_probs)
+            if avg_logprobs:
+                out["mean_avg_logprob"] = sum(avg_logprobs) / len(avg_logprobs)
+            return out
+
+        def _likely_no_speech(metrics: dict, text_out: str) -> bool:
+            if not metrics:
+                return False
+            max_nsp = metrics.get("max_no_speech_prob")
+            mean_nsp = metrics.get("mean_no_speech_prob")
+            mean_alp = metrics.get("mean_avg_logprob")
+
+            # Very strong signal of silence.
+            if isinstance(max_nsp, (int, float)) and max_nsp >= 0.95:
+                return True
+
+            # Common case: silence/low-quality audio -> high no_speech_prob + low avg_logprob, yet non-empty text.
+            if (text_out or "").strip():
+                if isinstance(mean_nsp, (int, float)) and mean_nsp >= 0.85:
+                    if mean_alp is None:
+                        # If we don't have avg_logprob, still be conservative: require very high no_speech.
+                        return mean_nsp >= 0.92
+                    if isinstance(mean_alp, (int, float)) and mean_alp <= -1.0:
+                        return True
+            return False
+
+        async def _transcribe_once(language_hint: Optional[str]) -> tuple[str, Optional[str], Optional[str], dict]:
             kwargs = {
                 "model": "whisper-1",
                 # IMPORTANT: pass through the actual recorded format (e.g. audio/mp4 from Safari).
                 "file": (upload_filename, audio_data, upload_content_type),
                 "response_format": "verbose_json",
+                # Lower temperature reduces "hallucinations" on silence.
+                "temperature": 0,
             }
             if language_hint:
                 # Force transcription in the specified language - this is not just a hint, it forces the output language
@@ -965,12 +1022,26 @@ async def transcribe_audio(
             text_out = (getattr(t, "text", None) or "").strip()
             detected_out = getattr(t, "language", None)
             used_hint_out = language_hint
-            print(f"[TRANSCRIBE] Result: text={text_out[:80]!r}, detected={detected_out}, forced={language_hint}")
-            return text_out, detected_out, used_hint_out
+            metrics = _extract_speech_metrics(t)
+            print(
+                f"[TRANSCRIBE] Result: text={text_out[:80]!r}, detected={detected_out}, forced={language_hint}, "
+                f"metrics={metrics}"
+            )
+            return text_out, detected_out, used_hint_out, metrics
 
         # When we have a hint (target language), force transcription in that language.
         # If Whisper ignores our language constraint and produces wrong-language text, we need to handle it.
-        text, detected, used_hint = await _transcribe_once(hint_code if use_hint else None)
+        text, detected, used_hint, metrics = await _transcribe_once(hint_code if use_hint else None)
+
+        # Guard against Whisper hallucinations on silence/background noise.
+        if _likely_no_speech(metrics, text):
+            print(f"[TRANSCRIBE] Likely no speech (metrics={metrics}); treating transcript as empty")
+            return {
+                "transcript": "",
+                "detected_language": detected,
+                "used_hint": used_hint,
+                "valid_for_target": False,
+            }
         
         # Early return if no text - don't do validation on empty transcripts
         if not text or not text.strip():
@@ -1041,7 +1112,10 @@ async def transcribe_audio(
             # If wrong language detected, retry with auto-detect as fallback (better than wrong language)
             if is_wrong_language:
                 print(f"[TRANSCRIBE] Retrying with auto-detect (forced {hint_code} failed)")
-                text2, detected2, used_hint2 = await _transcribe_once(None)
+                text2, detected2, used_hint2, metrics2 = await _transcribe_once(None)
+                if _likely_no_speech(metrics2, text2):
+                    print(f"[TRANSCRIBE] Retry likely no speech (metrics={metrics2}); treating transcript as empty")
+                    text2 = ""
                 # Only use auto-detect result if it's actually in the target language
                 # Check both text content and detected language match
                 detected2_normalized = normalize_lang_code(detected2) if detected2 else None
@@ -1067,7 +1141,10 @@ async def transcribe_audio(
         # For Latin languages, script mismatch shouldn't happen, so skip this check
         if use_hint and hint_code not in latin_langs and _looks_like_wrong_script_for_latin(text):
             print(f"[TRANSCRIBE] Wrong script despite hint={hint_code}, retrying auto-detect")
-            text2, detected2, used_hint2 = await _transcribe_once(None)
+            text2, detected2, used_hint2, metrics2 = await _transcribe_once(None)
+            if _likely_no_speech(metrics2, text2):
+                print(f"[TRANSCRIBE] Retry likely no speech (metrics={metrics2}); treating transcript as empty")
+                text2 = ""
             # Only use auto-detect result if it's valid for target language
             if text2 and not _looks_like_wrong_script_for_latin(text2):
                 detected2_normalized = normalize_lang_code(detected2) if detected2 else None
