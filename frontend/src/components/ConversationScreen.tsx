@@ -63,6 +63,8 @@ export function ConversationScreen() {
   const initRef = useRef(false)
   const isClosingRef = useRef(false) // Prevent multiple close clicks
   const chatEndRef = useRef<HTMLDivElement>(null) // For auto-scrolling chat
+  const chatScrollRef = useRef<HTMLDivElement>(null) // Scroll container (avoid scrollIntoView on iOS)
+  const hasAutoScrolledRef = useRef(false)
   
   // CorrectionCard manages its own expanded state, we just need a callback
   const handleCorrectionExpandChange = useCallback((_expanded: boolean) => {
@@ -394,11 +396,25 @@ export function ConversationScreen() {
     }
   }, [permissionState, isInitialized, startError, startConversation])
 
-  // Auto-scroll chat to bottom when messages change
+  // Auto-scroll chat to bottom when messages change.
+  // IMPORTANT: avoid scrollIntoView() on iOS/WKWebView; it can scroll the page/webview and cause UI clipping.
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
+    const el = chatScrollRef.current
+    if (!el) return
+
+    // First time: no animation (prevents iOS rubber-banding).
+    const behavior: ScrollBehavior = hasAutoScrolledRef.current ? 'smooth' : 'auto'
+    hasAutoScrolledRef.current = true
+
+    // Wait a frame so layout/height is correct before scrolling.
+    requestAnimationFrame(() => {
+      try {
+        el.scrollTo({ top: el.scrollHeight, behavior })
+      } catch {
+        // Fallback for older WebViews
+        el.scrollTop = el.scrollHeight
+      }
+    })
   }, [conversationHistory])
 
   // REMOVED: Auto-request feature to prevent infinite loops
@@ -678,7 +694,7 @@ export function ConversationScreen() {
       {/* Main scrollable content area */}
       <div className="flex-1 flex flex-col w-full px-4 min-h-0">
         {/* Chat History */}
-        <div className="flex-1 w-full overflow-y-auto px-2 py-2 min-h-0">
+        <div ref={chatScrollRef} className="flex-1 w-full overflow-y-auto px-2 py-2 min-h-0">
           <div className="space-y-3">
             {conversationHistory.map((msg, idx) => (
               <motion.div
