@@ -47,6 +47,7 @@ export function ConversationScreen() {
     transcribeAudio, 
     getAiResponse, 
     textToSpeech, 
+    translateText,
     analyzeUserSpeech,
     clearCorrection,
   } = useApi()
@@ -58,12 +59,15 @@ export function ConversationScreen() {
   const [permissionState, setPermissionState] = useState<'checking' | 'prompt' | 'requesting' | 'granted' | 'denied'>('checking')
   const [isWaitingForUser, setIsWaitingForUser] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  const [aiTranslationOpen, setAiTranslationOpen] = useState<{ source: string; translation: string } | null>(null)
+  const [aiTranslationLoading, setAiTranslationLoading] = useState(false)
   
   const initRef = useRef(false)
   const isClosingRef = useRef(false) // Prevent multiple close clicks
   const chatEndRef = useRef<HTMLDivElement>(null) // For auto-scrolling chat
   const chatScrollRef = useRef<HTMLDivElement>(null) // Scroll container (avoid scrollIntoView on iOS)
   const hasAutoScrolledRef = useRef(false)
+  const aiTranslationCacheRef = useRef<Map<string, string>>(new Map())
   
   // CorrectionCard manages its own expanded state, we just need a callback
   const handleCorrectionExpandChange = useCallback((_expanded: boolean) => {
@@ -415,6 +419,33 @@ export function ConversationScreen() {
     })
   }, [conversationHistory])
 
+  const handleTapAiMessage = useCallback(async (text: string) => {
+    const source = (text || '').trim()
+    if (!source) return
+
+    // Toggle if tapping the same message again
+    if (aiTranslationOpen?.source === source) {
+      setAiTranslationOpen(null)
+      return
+    }
+
+    const cached = aiTranslationCacheRef.current.get(source)
+    if (cached) {
+      setAiTranslationOpen({ source, translation: cached })
+      return
+    }
+
+    setAiTranslationLoading(true)
+    setAiTranslationOpen({ source, translation: '' })
+
+    // Translate AI's target-language message into English (current app UX is English-first).
+    const translated = await translateText(source, targetLanguage, 'en')
+    const finalText = translated || '(Translation unavailable)'
+    aiTranslationCacheRef.current.set(source, finalText)
+    setAiTranslationOpen({ source, translation: finalText })
+    setAiTranslationLoading(false)
+  }, [aiTranslationOpen?.source, translateText, targetLanguage])
+
   // REMOVED: Auto-request feature to prevent infinite loops
   // Users must manually click "Enable Microphone" button to request permission
   // This is simpler and more reliable than trying to detect state transitions
@@ -707,6 +738,13 @@ export function ConversationScreen() {
                       ? 'bg-primary-500 text-white'
                       : 'bg-surface-700 text-surface-200 border border-surface-600'
                   }`}
+                  role={msg.role === 'assistant' ? 'button' : undefined}
+                  tabIndex={msg.role === 'assistant' ? 0 : undefined}
+                  onClick={msg.role === 'assistant' ? () => handleTapAiMessage(msg.content) : undefined}
+                  onKeyDown={msg.role === 'assistant' ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') handleTapAiMessage(msg.content)
+                  } : undefined}
+                  style={msg.role === 'assistant' ? { cursor: 'pointer' } : undefined}
                 >
                   <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
                 </div>
@@ -788,6 +826,53 @@ export function ConversationScreen() {
           )}
         </div>
       </div>
+
+      {/* Tap-to-translate modal */}
+      <AnimatePresence>
+        {aiTranslationOpen && (
+          <motion.div
+            key="ai-translation-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-end justify-center p-4"
+            onClick={() => setAiTranslationOpen(null)}
+          >
+            <motion.div
+              initial={{ y: 30, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 30, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md glass rounded-2xl p-4 border border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm text-surface-400">Translation (English)</div>
+                <button
+                  className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                  onClick={() => setAiTranslationOpen(null)}
+                >
+                  <X className="w-4 h-4 text-surface-400" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-surface-500 uppercase tracking-wider">AI said</div>
+                <div className="text-surface-200 text-sm whitespace-pre-wrap">{aiTranslationOpen.source}</div>
+              </div>
+
+              <div className="h-px bg-white/10 my-3" />
+
+              <div className="space-y-1">
+                <div className="text-xs text-surface-500 uppercase tracking-wider">Meaning</div>
+                <div className="text-white text-base whitespace-pre-wrap">
+                  {aiTranslationLoading ? 'Translating…' : aiTranslationOpen.translation}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Bottom fixed area: Status + Done button + Timer */}
       <div className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8">

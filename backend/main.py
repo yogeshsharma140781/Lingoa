@@ -603,6 +603,11 @@ class CorrectionRequest(BaseModel):
     target_language: str      # Language being learned (e.g., "hi")
     user_language: str = "en" # User's native language for explanations
 
+class TranslateRequest(BaseModel):
+    text: str
+    source_language: str
+    target_language: str = "en"
+
 # ============ Session Management ============
 
 @app.post("/api/session/start")
@@ -2624,6 +2629,54 @@ Keep explanations simple and encouraging. Focus on helping them learn, not point
     except Exception as e:
         print(f"[ANALYZE ERROR] {e}")
         return {"has_correction": False, "error": str(e)}
+
+
+@app.post("/api/translate")
+async def translate_text(data: TranslateRequest):
+    """
+    Translate arbitrary text between languages (used for "tap to translate" on AI messages).
+    Returns plain text translation.
+    """
+    try:
+        text = (data.text or "").strip()
+        if not text:
+            return {"translation": ""}
+
+        src = normalize_lang_code(data.source_language) or (data.source_language or "").strip()
+        tgt = normalize_lang_code(data.target_language) or (data.target_language or "").strip() or "en"
+
+        source_name = LANGUAGE_NAMES.get(src, src or "the source language")
+        target_name = LANGUAGE_NAMES.get(tgt, tgt or "the target language")
+
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You translate text for a language-learning app.\n"
+                        "Rules:\n"
+                        "- Output ONLY the translation text (no quotes, no extra commentary).\n"
+                        "- Keep meaning faithful, but natural.\n"
+                        "- If the input is already in the target language, return it unchanged.\n"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Translate from {source_name} to {target_name}:\n\n{text}",
+                },
+            ],
+            temperature=0.2,
+            max_tokens=400,
+        )
+
+        translation = (resp.choices[0].message.content or "").strip()
+        if translation and tgt and tgt != "en":
+            translation = await ensure_target_language(translation, tgt)
+        return {"translation": translation}
+    except Exception as e:
+        print(f"[TRANSLATE ERROR] {e}")
+        return {"translation": ""}
 
 @app.post("/api/tts/natural")
 async def text_to_speech_natural(data: TextToSpeechRequest):

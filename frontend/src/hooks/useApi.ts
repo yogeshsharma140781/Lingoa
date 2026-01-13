@@ -20,7 +20,7 @@ export const API_BASE = getApiBase()
 // Module-level audio tracking for interruptibility
 let currentAudio: HTMLAudioElement | null = null
 let audioUrls: string[] = [] // Track URLs for cleanup
-let recentFillers: string[] = [] // Track recent fillers to avoid repetition
+// (Removed) thinking filler audio ("hmm...", etc.)
 
 // Map UI speed to actual TTS speed
 // Speed is applied server-side (OpenAI) or client-side playbackRate (ElevenLabs)
@@ -660,63 +660,33 @@ export function useApi() {
     setIsAiSpeaking(false)
   }, [setIsAiSpeaking])
 
-  // Play a thinking filler while processing (~30% chance)
-  const playThinkingFiller = useCallback(async (): Promise<void> => {
-    // Only play filler 30% of the time
-    if (Math.random() > 0.3) return
-    
+  // Translate arbitrary text (used for "tap to translate" AI messages)
+  const translateText = useCallback(async (
+    text: string,
+    sourceLanguage: string,
+    targetLanguage: string = 'en'
+  ): Promise<string | null> => {
     try {
-      const actualSpeed = getActualSpeed(audioSpeed, targetLanguage)
-      
-      const res = await fetch(`${API_BASE}/tts/filler`, {
+      const res = await fetch(`${API_BASE}/translate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          language: targetLanguage,
-          speed: actualSpeed,
-          exclude: recentFillers, // Avoid recently used fillers
+          text,
+          source_language: sourceLanguage,
+          target_language: targetLanguage,
         }),
       })
-      
-      if (!res.ok) return
-      
+      if (!res.ok) return null
       const data = await res.json()
-      
-      // Track this filler to avoid repetition
-      if (data.text) {
-        recentFillers.push(data.text)
-        // Keep only last 4 fillers
-        if (recentFillers.length > 4) {
-          recentFillers.shift()
-        }
-      }
-      
-      const audioData = atob(data.audio)
-      const audioArray = new Uint8Array(audioData.length)
-      for (let i = 0; i < audioData.length; i++) {
-        audioArray[i] = audioData.charCodeAt(i)
-      }
-      const audioBlob = new Blob([audioArray], { type: 'audio/mp3' })
-      const audioUrl = URL.createObjectURL(audioBlob)
-      
-      // Play filler (don't wait for it to finish)
-      const audio = new Audio(audioUrl)
-      currentAudio = audio
-      setIsAiSpeaking(true)
-      
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl)
-        // Don't set isAiSpeaking to false - main response will handle that
-      }
-      
-      audio.play().catch(() => {
-        URL.revokeObjectURL(audioUrl)
-      })
-      
+      const t = (data?.translation || '').toString().trim()
+      return t || null
     } catch (err) {
-      console.error('Filler error:', err)
+      console.error('Translate error:', err)
+      return null
     }
-  }, [targetLanguage, audioSpeed, setIsAiSpeaking])
+  }, [])
+
+  // (Removed) thinking filler audio ("hmm...", etc.)
 
   // Analyze user speech for corrections
   const analyzeUserSpeech = useCallback(async (transcript: string): Promise<Correction | null> => {
@@ -780,7 +750,7 @@ export function useApi() {
     textToSpeech,
     generateImprovementAudio,
     stopAudio,
-    playThinkingFiller,
+    translateText,
     analyzeUserSpeech,
     clearCorrection,
   }
