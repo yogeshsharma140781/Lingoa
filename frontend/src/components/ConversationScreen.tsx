@@ -47,7 +47,6 @@ export function ConversationScreen() {
     transcribeAudio, 
     getAiResponse, 
     textToSpeech, 
-    playThinkingFiller,
     analyzeUserSpeech,
     clearCorrection,
   } = useApi()
@@ -285,8 +284,7 @@ export function ConversationScreen() {
             analyzeUserSpeech(transcript)
           }
           
-          // Play filler NOW - while AI is thinking (30% chance)
-          playThinkingFiller()
+          // No filler sounds while thinking
           
           // Minimal delay to show transcript (reduced from 600ms)
           await new Promise(r => setTimeout(r, 200))
