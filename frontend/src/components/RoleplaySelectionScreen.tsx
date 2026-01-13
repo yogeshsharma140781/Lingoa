@@ -58,7 +58,7 @@ export function RoleplaySelectionScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-screen bg-surface-900 text-white p-6 flex flex-col overflow-hidden"
+      className="h-full bg-surface-900 text-white p-6 flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

@@ -592,20 +592,10 @@ export function ConversationScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      // Use h-screen for iOS/WKWebView reliability (100% height can be wrong).
-      className="h-screen flex flex-col items-center relative z-10"
+      className="h-full flex flex-col items-center relative z-10"
     >
       {/* Header */}
-      <div
-        className="w-full flex items-center justify-between p-4 bg-[#1c1917]/80 backdrop-blur-sm z-20"
-        style={{
-          // Ensure header sits below the notch/status bar on iOS.
-          // env() will be 0 on platforms that don't support it.
-          paddingTop: isNativeIos
-            ? 'max(44px, calc(12px + env(safe-area-inset-top, 0px)))'
-            : undefined,
-        }}
-      >
+      <div className="w-full flex items-center justify-between p-4 pt-4 bg-[#1c1917]/80 backdrop-blur-sm z-20">
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -786,15 +776,7 @@ export function ConversationScreen() {
       </div>
 
       {/* Bottom fixed area: Status + Done button + Timer */}
-      <div
-        className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8"
-        style={{
-          // Keep controls above the home indicator on iOS.
-          paddingBottom: isNativeIos
-            ? 'max(24px, calc(16px + env(safe-area-inset-bottom, 0px)))'
-            : undefined,
-        }}
-      >
+      <div className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8">
         {/* Status indicator + Done button row */}
         <div className="flex items-center justify-center gap-4 mb-4">
           {/* Subtle status indicator */}

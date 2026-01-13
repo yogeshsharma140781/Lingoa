@@ -18,6 +18,14 @@ html, body, #root {
   padding: 0;
 }
 
+/* iOS safe-area: keep content below notch & above home indicator */
+#root {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
