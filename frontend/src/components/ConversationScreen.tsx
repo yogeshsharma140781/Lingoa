@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Capacitor } from '@capacitor/core'
-import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX } from 'lucide-react'
+import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX, Languages } from 'lucide-react'
 import { useStore } from '../store'
 import { useApi, unlockAudio } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
@@ -732,21 +732,22 @@ export function ConversationScreen() {
                 animate={{ opacity: 1, y: 0 }}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                    msg.role === 'user'
-                      ? 'bg-primary-500 text-white'
-                      : 'bg-surface-700 text-surface-200 border border-surface-600'
-                  }`}
-                  role={msg.role === 'assistant' ? 'button' : undefined}
-                  tabIndex={msg.role === 'assistant' ? 0 : undefined}
-                  onClick={msg.role === 'assistant' ? () => handleTapAiMessage(msg.content) : undefined}
-                  onKeyDown={msg.role === 'assistant' ? (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') handleTapAiMessage(msg.content)
-                  } : undefined}
-                  style={msg.role === 'assistant' ? { cursor: 'pointer' } : undefined}
-                >
+                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  msg.role === 'user'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-surface-700 text-surface-200 border border-surface-600'
+                }`}>
                   <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === 'assistant' && (
+                    <button
+                      className="mt-2 inline-flex items-center gap-1 text-xs text-surface-400 hover:text-surface-200 transition-colors"
+                      onClick={() => handleTapAiMessage(msg.content)}
+                      type="button"
+                    >
+                      <Languages className="w-3.5 h-3.5" />
+                      Translate
+                    </button>
+                  )}
                 </div>
               </motion.div>
             ))}
