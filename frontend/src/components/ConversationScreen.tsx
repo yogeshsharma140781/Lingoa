@@ -45,6 +45,7 @@ export function ConversationScreen() {
     startSession, 
     endSession, 
     transcribeAudio, 
+    transcribeAudioChunk,
     getAiResponse, 
     textToSpeech, 
     translateText,
@@ -67,6 +68,8 @@ export function ConversationScreen() {
   const chatEndRef = useRef<HTMLDivElement>(null) // For auto-scrolling chat
   const chatScrollRef = useRef<HTMLDivElement>(null) // Scroll container (avoid scrollIntoView on iOS)
   const hasAutoScrolledRef = useRef(false)
+  const chunkBusyRef = useRef(false)
+  const lastChunkTsRef = useRef(0)
   const aiTranslationCacheRef = useRef<Map<string, string>>(new Map())
   
   // CorrectionCard manages its own expanded state, we just need a callback
@@ -124,6 +127,26 @@ export function ConversationScreen() {
   // No auto-trigger - we only use the Done button
   const { volume, startRecording, stopRecording, stopRecordingAndGetBlob } = useVoiceActivity({
     silenceTimeout: 600, // Pause timer after 0.6s of silence for responsive pausing
+    chunkIntervalMs: 2000, // 2s chunks for streaming-ish transcription
+    onAudioData: async (blob) => {
+      if (!isWaitingForUser || isProcessing || isAiSpeaking) return
+      if (!blob || blob.size < 200) return
+
+      const now = Date.now()
+      if (now - lastChunkTsRef.current < 1500) return
+      if (chunkBusyRef.current) return
+
+      chunkBusyRef.current = true
+      lastChunkTsRef.current = now
+      try {
+        const partial = await transcribeAudioChunk(blob, targetLanguage)
+        if (partial && partial.trim()) {
+          setUserTranscript(partial.trim())
+        }
+      } finally {
+        chunkBusyRef.current = false
+      }
+    },
   })
 
   // Start the conversation after permission granted - MUST be defined before useEffect that uses it

@@ -1274,6 +1274,70 @@ async def transcribe_audio(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/transcribe_chunk")
+async def transcribe_audio_chunk(
+    audio: UploadFile = File(...),
+    language: str = Query("es"),
+    hint: Optional[str] = Query(None),
+):
+    """
+    Transcribe a short audio chunk for "streaming" UX.
+    This skips improvement and most validation to keep latency low.
+    """
+    try:
+        audio_data = await audio.read()
+
+        upload_filename = (getattr(audio, "filename", None) or "").strip() or "audio"
+        upload_content_type = (getattr(audio, "content_type", None) or "").strip() or "application/octet-stream"
+
+        if not audio_data or len(audio_data) < 200:
+            return {"partial": ""}
+
+        hint_code = normalize_lang_code(hint)
+        use_hint = bool(hint_code) and is_supported_language_code(hint_code)
+
+        kwargs = {
+            "model": "whisper-1",
+            "file": (upload_filename, audio_data, upload_content_type),
+            "response_format": "verbose_json",
+            "temperature": 0,
+        }
+        if use_hint:
+            kwargs["language"] = hint_code
+
+        t = await client.audio.transcriptions.create(**kwargs)
+        text_out = (getattr(t, "text", None) or "").strip()
+
+        # Basic no-speech guard (similar to /api/transcribe)
+        segs = getattr(t, "segments", None)
+        if segs is None and isinstance(t, dict):
+            segs = t.get("segments")
+        if segs and isinstance(segs, list):
+            nsp = []
+            alp = []
+            for s in segs:
+                n = getattr(s, "no_speech_prob", None)
+                a = getattr(s, "avg_logprob", None)
+                if isinstance(s, dict):
+                    n = s.get("no_speech_prob", n)
+                    a = s.get("avg_logprob", a)
+                if isinstance(n, (int, float)):
+                    nsp.append(float(n))
+                if isinstance(a, (int, float)):
+                    alp.append(float(a))
+            if nsp:
+                mean_nsp = sum(nsp) / len(nsp)
+                max_nsp = max(nsp)
+                mean_alp = (sum(alp) / len(alp)) if alp else None
+                if max_nsp >= 0.95 or (text_out and mean_nsp >= 0.85 and (mean_alp is None or mean_alp <= -1.0)):
+                    return {"partial": ""}
+
+        return {"partial": text_out}
+    except Exception as e:
+        print(f"[TRANSCRIBE CHUNK ERROR] {e}")
+        return {"partial": ""}
+
 @app.post("/api/conversation/respond")
 async def respond_to_user(data: UserMessage):
     """Generate streaming AI response"""

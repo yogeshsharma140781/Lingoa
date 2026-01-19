@@ -5,6 +5,7 @@ import { stopAllAudio } from './useApi'
 interface UseVoiceActivityOptions {
   silenceThreshold?: number
   silenceTimeout?: number
+  chunkIntervalMs?: number
   onSpeechStart?: () => void
   onSpeechEnd?: (duration: number) => void
   onAudioData?: (blob: Blob) => void
@@ -14,8 +15,10 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const {
     silenceThreshold = -15, // Very high threshold - requires clear speech, strongly filters background noise
     silenceTimeout = 2000,
+    chunkIntervalMs = 500,
     onSpeechStart,
     onSpeechEnd,
+    onAudioData,
   } = options
 
   const { setIsSpeaking, setMicPermission, isAiSpeaking } = useStore()
@@ -124,6 +127,9 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
         console.log('[Recorder] ondataavailable:', e.data.size, 'bytes')
         if (e.data.size > 0) {
           chunksRef.current.push(e.data)
+          if (onAudioData) {
+            onAudioData(e.data)
+          }
         }
       }
 
@@ -133,7 +139,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
 
       // Start recording immediately
       console.log('[Recorder] Starting recording...')
-      mediaRecorderRef.current.start(500)
+      mediaRecorderRef.current.start(chunkIntervalMs)
 
       // Start analyzing
       setIsRecording(true)

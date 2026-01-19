@@ -311,7 +311,8 @@ export function useApi() {
       const hintParam = languageHint ? `&hint=${encodeURIComponent(languageHint)}` : ''
       const fallbackParam = `&fallback_language=${encodeURIComponent(fallbackLang)}`
       const sessionParam = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''
-      const improveParam = '&improve_sentence=true'
+      // Task 1: skip improvement pass for faster transcription
+      const improveParam = '&improve_sentence=false'
       const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}`, {
         method: 'POST',
         body: formData,
@@ -333,6 +334,39 @@ export function useApi() {
     }
     return null
   }, [targetLanguage, sessionId])
+
+  // Transcribe a short chunk (streaming-ish, faster, no improvement)
+  const transcribeAudioChunk = useCallback(async (
+    audioBlob: Blob,
+    languageHint?: string | null
+  ): Promise<string | null> => {
+    try {
+      if (!audioBlob || audioBlob.size === 0) return null
+
+      const formData = new FormData()
+      const ct = (audioBlob?.type || '').toLowerCase()
+      const filename =
+        ct.includes('audio/mp4') ? 'audio.m4a' :
+        ct.includes('audio/m4a') ? 'audio.m4a' :
+        ct.includes('audio/wav') ? 'audio.wav' :
+        ct.includes('audio/mpeg') ? 'audio.mp3' :
+        'audio.webm'
+      formData.append('audio', audioBlob, filename)
+
+      const hintParam = languageHint ? `&hint=${encodeURIComponent(languageHint)}` : ''
+      const res = await fetch(`${API_BASE}/transcribe_chunk?language=${targetLanguage}${hintParam}`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      const text = (data?.partial || '').toString().trim()
+      return text || null
+    } catch (err) {
+      console.error('Chunk transcription error:', err)
+      return null
+    }
+  }, [targetLanguage])
 
   // Get AI response (streaming)
   const getAiResponse = useCallback(async (transcript: string, detectedLanguage?: string | null): Promise<string | null> => {
@@ -746,6 +780,7 @@ export function useApi() {
     startSession,
     endSession,
     transcribeAudio,
+    transcribeAudioChunk,
     getAiResponse,
     textToSpeech,
     generateImprovementAudio,
