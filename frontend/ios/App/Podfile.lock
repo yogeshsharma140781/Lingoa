@@ -29,11 +29,11 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/status-bar"
 
 SPEC CHECKSUMS:
-  Capacitor: 09d9ff8e9618e8c4b3cab2bbee34a17215dd2fef
-  CapacitorApp: 3ddbd30ac18c321531c3da5e707b60873d89dd60
+  Capacitor: 358dd1c3fdd71d969547b17e159fd8a7736cb45f
+  CapacitorApp: 63b237168fc869e758481dba283315a85743ee78
   CapacitorCordova: bf648a636f3c153f652d312ae145fb508b6ffced
-  CapacitorPreferences: 688a15748e6fb91d52c7563e5f2df3be503dd694
-  CapacitorStatusBar: 4bf126c3c01dbaca8a4e416a29c4899cf91d0626
+  CapacitorPreferences: 913eef88272c13eb6445b21e51fe8ef6635412cc
+  CapacitorStatusBar: d0e0151c89c001a9c7125bac59ddedf76b664768
 
 PODFILE CHECKSUM: f0e7972a853203ca7d0ad0433a461b37837a816c
 
