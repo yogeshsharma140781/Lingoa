@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# Also matches when node_modules is a symlink (e.g. pointed outside a
+# cloud-synced folder to avoid Drive/Dropbox mangling native binaries) -
+# the trailing-slash pattern above only matches real directories.
+node_modules
 backend/venv/
 __pycache__/
 *.pyc

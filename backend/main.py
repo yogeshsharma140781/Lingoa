@@ -992,15 +992,16 @@ async def transcribe_audio(
         def _likely_no_speech(metrics: dict, text_out: str) -> bool:
             if not metrics:
                 return False
-            max_nsp = metrics.get("max_no_speech_prob")
             mean_nsp = metrics.get("mean_no_speech_prob")
             mean_alp = metrics.get("mean_avg_logprob")
 
-            # Very strong signal of silence.
-            if isinstance(max_nsp, (int, float)) and max_nsp >= 0.95:
-                return True
-
-            # Common case: silence/low-quality audio -> high no_speech_prob + low avg_logprob, yet non-empty text.
+            # NOTE: we intentionally do NOT use max_no_speech_prob here.
+            # A normal recording spans from mic-open to the user tapping "Done", so it
+            # almost always contains a leading/trailing silent segment that alone can
+            # score >= 0.95 on no_speech_prob even when other segments contain clear
+            # speech. Gating on a single segment's max would discard valid transcripts.
+            # Instead we require the whole clip (mean across all segments) to look silent,
+            # and only when there's no confident text to fall back on.
             if (text_out or "").strip():
                 if isinstance(mean_nsp, (int, float)) and mean_nsp >= 0.85:
                     if mean_alp is None:
@@ -1328,9 +1329,10 @@ async def transcribe_audio_chunk(
                     alp.append(float(a))
             if nsp:
                 mean_nsp = sum(nsp) / len(nsp)
-                max_nsp = max(nsp)
                 mean_alp = (sum(alp) / len(alp)) if alp else None
-                if max_nsp >= 0.95 or (text_out and mean_nsp >= 0.85 and (mean_alp is None or mean_alp <= -1.0)):
+                # Use the mean across all segments (not max of one segment) so a brief
+                # silent moment inside a 2s chunk doesn't discard real speech in it.
+                if text_out and mean_nsp >= 0.85 and (mean_alp is None or mean_alp <= -1.0):
                     return {"partial": ""}
 
         return {"partial": text_out}

@@ -27,12 +27,18 @@ Users speak to an AI conversation partner for 5 minutes daily. The timer only ru
 
 ### Backend Setup
 
+> **Note:** This project directory is synced by Google Drive. Google Drive does not
+> preserve symlinks and can rename/move synced folders (e.g. appending `(1)`), both of
+> which break a Python venv's internal binary symlinks and hardcoded shebang paths.
+> Keep the venv **outside** this folder (e.g. `~/.venvs/lingoa-backend`) instead of the
+> `backend/venv` path used in older setups.
+
 ```bash
 cd backend
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Create virtual environment OUTSIDE this Drive-synced folder
+python3 -m venv ~/.venvs/lingoa-backend
+source ~/.venvs/lingoa-backend/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt

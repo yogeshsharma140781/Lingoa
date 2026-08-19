@@ -12,6 +12,14 @@ import { YouMeantCard } from './YouMeantCard'
 // Speed options (UI labels - actual speed is mapped in useApi)
 const SPEED_OPTIONS = [0.8, 0.9, 1.0]
 
+// After this much continued silence following speech, automatically submit the
+// turn (same as tapping Done), so users don't have to remember to tap it.
+// Combined with useVoiceActivity's own ~600ms silence debounce (which flips
+// isSpeaking to false), the total pause before auto-submit is roughly 2s -
+// enough for a learner to take a breath or think mid-sentence without
+// triggering early, but not so long it feels unresponsive.
+const AUTO_SUBMIT_SILENCE_MS = 1400
+
 export function ConversationScreen() {
   const {
     setScreen,
@@ -62,7 +70,8 @@ export function ConversationScreen() {
   const [startError, setStartError] = useState<string | null>(null)
   const [aiTranslationOpen, setAiTranslationOpen] = useState<{ source: string; translation: string } | null>(null)
   const [aiTranslationLoading, setAiTranslationLoading] = useState(false)
-  
+  const [autoSubmitPending, setAutoSubmitPending] = useState(false) // true while counting down to auto-submit after a pause
+
   const initRef = useRef(false)
   const isClosingRef = useRef(false) // Prevent multiple close clicks
   const chatEndRef = useRef<HTMLDivElement>(null) // For auto-scrolling chat
@@ -71,6 +80,9 @@ export function ConversationScreen() {
   const chunkBusyRef = useRef(false)
   const lastChunkTsRef = useRef(0)
   const aiTranslationCacheRef = useRef<Map<string, string>>(new Map())
+  const hasSpokenThisTurnRef = useRef(false) // Has the user said anything yet in the current "waiting for user" turn?
+  const isHandlingDoneRef = useRef(false) // Synchronous re-entrancy guard (manual tap + auto-submit can race)
+  const handleDoneRef = useRef<() => void>(() => {}) // Always points at the latest handleDone; set below
   
   // CorrectionCard manages its own expanded state, we just need a callback
   const handleCorrectionExpandChange = useCallback((_expanded: boolean) => {
@@ -182,6 +194,7 @@ export function ConversationScreen() {
         }
         
         // Start recording and set waiting for user
+        hasSpokenThisTurnRef.current = false
         startRecording()
         setIsWaitingForUser(true)
       } else {
@@ -278,15 +291,19 @@ export function ConversationScreen() {
     }
   }, [setMicPermission])
 
-  // Handle "Done" button - user manually triggers AI response
+  // Handle "Done" - triggered either by tapping the button or by auto-submit
+  // after a pause in speech. Guarded so both paths can't double-fire.
   const handleDone = async () => {
-    if (isProcessing || isAiSpeaking) return
-    
+    if (isProcessing || isAiSpeaking || isHandlingDoneRef.current) return
+    isHandlingDoneRef.current = true
+    setAutoSubmitPending(false)
+
     setIsWaitingForUser(false)
     setIsProcessing(true)
     setUserTranscript('Transcribing...')
     setCurrentYouMeant(null)
-    
+
+    try {
     // Stop recording and wait for MediaRecorder to flush final chunk (Safari/WKWebView needs this)
     console.log('[handleDone] Calling stopRecordingAndGetBlob...')
     const blob = await stopRecordingAndGetBlob()
@@ -359,13 +376,20 @@ export function ConversationScreen() {
       await new Promise(r => setTimeout(r, 1000))
       setUserTranscript('')
     }
-    
-    setIsProcessing(false)
-    
-    // Restart recording for next turn
-    startRecording()
-    setIsWaitingForUser(true)
+    } finally {
+      setIsProcessing(false)
+
+      // Restart recording for next turn
+      hasSpokenThisTurnRef.current = false
+      startRecording()
+      setIsWaitingForUser(true)
+      isHandlingDoneRef.current = false
+    }
   }
+
+  // Keep a stable ref to the latest handleDone, so the auto-submit timer
+  // (scheduled from an effect below) always calls the current version.
+  handleDoneRef.current = handleDone
 
   const handleClose = async () => {
     // Prevent multiple clicks
@@ -406,6 +430,36 @@ export function ConversationScreen() {
     
     return () => clearInterval(interval)
   }, [isInitialized, isSpeaking, isAiSpeaking, isProcessing, incrementSpeakingTime])
+
+  // Auto-submit the turn after a pause in speech, so users don't have to
+  // remember to tap "Done". Tapping Done manually still works and takes
+  // priority (handleDone is re-entrancy-guarded against both firing).
+  useEffect(() => {
+    if (!isWaitingForUser || isAiSpeaking || isProcessing) {
+      setAutoSubmitPending(false)
+      return
+    }
+
+    if (isSpeaking) {
+      // User is talking - remember it, and don't count silence yet.
+      hasSpokenThisTurnRef.current = true
+      setAutoSubmitPending(false)
+      return
+    }
+
+    if (!hasSpokenThisTurnRef.current) {
+      // Silence, but nothing said yet this turn - nothing to auto-submit.
+      return
+    }
+
+    // Silence after speech: start (or continue) the countdown to auto-submit.
+    setAutoSubmitPending(true)
+    const timerId = window.setTimeout(() => {
+      handleDoneRef.current()
+    }, AUTO_SUBMIT_SILENCE_MS)
+
+    return () => window.clearTimeout(timerId)
+  }, [isSpeaking, isWaitingForUser, isAiSpeaking, isProcessing])
 
   // Start conversation when permission is granted
   useEffect(() => {
@@ -955,7 +1009,7 @@ export function ConversationScreen() {
                   ))}
                 </div>
                 <span className="text-primary-400 text-sm font-medium">
-                  {isSpeaking ? 'Listening...' : 'Ready'}
+                  {isSpeaking ? 'Listening...' : autoSubmitPending ? 'Got it, sending...' : 'Ready'}
                 </span>
               </>
             ) : (
