@@ -873,6 +873,30 @@ Confidence guide:
 
 # ============ Streaming Endpoints ============
 
+# Whisper is well known to "hallucinate" specific boilerplate phrases on silent or
+# noisy audio - text memorized from its training data (crowd-sourced subtitle
+# credits, video outros, etc), reproduced with deceptively high confidence. Because
+# it's confident, it slips past the no_speech_prob/avg_logprob guard, and because
+# it's produced correctly in the target language, it slips past language validation
+# too. These markers are literal brand/domain names that don't get translated, so
+# checking for them is language-agnostic and doesn't rely on us knowing every
+# language's exact phrasing (e.g. "Ondertitels ingediend door de Amara.org
+# gemeenschap" in Dutch, "Subtitles by the Amara.org community" in English, etc -
+# all contain "amara.org" verbatim).
+KNOWN_HALLUCINATION_MARKERS = [
+    "amara.org",
+]
+
+
+def is_known_hallucination(text: str) -> bool:
+    """Cheap text-based guard for well-documented Whisper hallucination phrases
+    that a pure confidence-score guard (_likely_no_speech) won't catch."""
+    if not text:
+        return False
+    t = text.lower()
+    return any(marker in t for marker in KNOWN_HALLUCINATION_MARKERS)
+
+
 @app.post("/api/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
@@ -1040,15 +1064,15 @@ async def transcribe_audio(
         text, detected, used_hint, metrics = await _transcribe_once(hint_code if use_hint else None)
 
         # Guard against Whisper hallucinations on silence/background noise.
-        if _likely_no_speech(metrics, text):
-            print(f"[TRANSCRIBE] Likely no speech (metrics={metrics}); treating transcript as empty")
+        if _likely_no_speech(metrics, text) or is_known_hallucination(text):
+            print(f"[TRANSCRIBE] Likely no speech or known hallucination (metrics={metrics}, text={text[:80]!r}); treating transcript as empty")
             return {
                 "transcript": "",
                 "detected_language": detected,
                 "used_hint": used_hint,
                 "valid_for_target": False,
             }
-        
+
         # Early return if no text - don't do validation on empty transcripts
         if not text or not text.strip():
             print(f"[TRANSCRIBE] Empty transcript returned from Whisper")
@@ -1119,8 +1143,8 @@ async def transcribe_audio(
             if is_wrong_language:
                 print(f"[TRANSCRIBE] Retrying with auto-detect (forced {hint_code} failed)")
                 text2, detected2, used_hint2, metrics2 = await _transcribe_once(None)
-                if _likely_no_speech(metrics2, text2):
-                    print(f"[TRANSCRIBE] Retry likely no speech (metrics={metrics2}); treating transcript as empty")
+                if _likely_no_speech(metrics2, text2) or is_known_hallucination(text2):
+                    print(f"[TRANSCRIBE] Retry likely no speech or known hallucination (metrics={metrics2}, text={text2[:80]!r}); treating transcript as empty")
                     text2 = ""
                 # Only use auto-detect result if it's actually in the target language
                 # Check both text content and detected language match
@@ -1148,8 +1172,8 @@ async def transcribe_audio(
         if use_hint and hint_code not in latin_langs and _looks_like_wrong_script_for_latin(text):
             print(f"[TRANSCRIBE] Wrong script despite hint={hint_code}, retrying auto-detect")
             text2, detected2, used_hint2, metrics2 = await _transcribe_once(None)
-            if _likely_no_speech(metrics2, text2):
-                print(f"[TRANSCRIBE] Retry likely no speech (metrics={metrics2}); treating transcript as empty")
+            if _likely_no_speech(metrics2, text2) or is_known_hallucination(text2):
+                print(f"[TRANSCRIBE] Retry likely no speech or known hallucination (metrics={metrics2}, text={text2[:80]!r}); treating transcript as empty")
                 text2 = ""
             # Only use auto-detect result if it's valid for target language
             if text2 and not _looks_like_wrong_script_for_latin(text2):
@@ -1334,6 +1358,9 @@ async def transcribe_audio_chunk(
                 # silent moment inside a 2s chunk doesn't discard real speech in it.
                 if text_out and mean_nsp >= 0.85 and (mean_alp is None or mean_alp <= -1.0):
                     return {"partial": ""}
+
+        if is_known_hallucination(text_out):
+            return {"partial": ""}
 
         return {"partial": text_out}
     except Exception as e:

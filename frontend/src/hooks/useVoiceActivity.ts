@@ -37,6 +37,13 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const silenceStartRef = useRef<number>(0)
   const animationFrameRef = useRef<number>(0)
   const speechDurationRef = useRef<number>(0)
+  // Adaptive ambient noise floor (dB-like scale, see analyzeAudio). A single fixed
+  // threshold works in a quiet room but false-triggers on steady background noise
+  // (fan, traffic, echo) in a real environment. Instead we track a slow-moving
+  // estimate of the room's actual quiet level and require speech to be clearly
+  // louder than THAT, not just louder than a hardcoded number picked in a quiet
+  // office. Starts low (assume quiet) and rises to match reality within ~1-2s.
+  const noiseFloorRef = useRef<number>(-100)
   // Safari/WKWebView often doesn't support audio/webm; prefer mp4/m4a when available.
   const mimeTypeRef = useRef<string>('audio/mp4')
   
@@ -145,6 +152,9 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       setIsRecording(true)
       isSpeakingRef.current = false
       silenceStartRef.current = 0
+      // Recalibrate to this turn's ambient noise from scratch - the room/environment
+      // may have changed since the last turn.
+      noiseFloorRef.current = -100
       analyzeAudio()
 
     } catch (err) {
@@ -295,12 +305,19 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     const db = average > 0 ? 20 * Math.log10(average / 128) : -100
 
     const now = Date.now()
-    
+
     // Read current values from refs to avoid stale closures
     const currentThreshold = silenceThresholdRef.current
     const currentTimeout = silenceTimeoutRef.current
 
-    if (db > currentThreshold) {
+    // How much louder than the room's own ambient noise a sound needs to be
+    // before we treat it as speech rather than background hum/traffic/echo.
+    const NOISE_MARGIN_DB = 9
+    // Effective threshold is whichever is stricter: the configured baseline
+    // (tuned for a quiet room) or the adaptive floor + margin (for a noisy one).
+    const effectiveThreshold = Math.max(currentThreshold, noiseFloorRef.current + NOISE_MARGIN_DB)
+
+    if (db > effectiveThreshold) {
       // Sound detected
       silenceStartRef.current = 0
 
@@ -319,7 +336,15 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
 
       speechDurationRef.current = now - speechStartTimeRef.current
     } else {
-      // Silence detected
+      // Silence (relative to the room) detected.
+      // Only let the ambient floor drift toward what we're hearing while we're NOT
+      // mid-speech, so a quiet dip within a sentence doesn't drag the floor down,
+      // and loud speech itself never gets absorbed into "this is just noise."
+      if (!isSpeakingRef.current) {
+        const calibrationRate = 0.05 // slow EMA - converges in roughly 1-2s
+        noiseFloorRef.current = noiseFloorRef.current * (1 - calibrationRate) + db * calibrationRate
+      }
+
       if (isSpeakingRef.current) {
         if (silenceStartRef.current === 0) {
           silenceStartRef.current = now
