@@ -26,6 +26,8 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 # Import TTS provider (ElevenLabs primary, OpenAI fallback)
+import db
+
 from tts_provider import (
     get_tts_provider, 
     get_tts_provider_type,
@@ -47,10 +49,10 @@ APP_BUILD_TAG = "translation-pending-gate-v3"
 # Supported language codes used in the app
 SUPPORTED_LANGUAGE_CODES = {"en", "es", "fr", "de", "nl", "it", "pt", "hi", "zh", "ja", "ko"}
 
-# In-memory storage (replace with DB in production)
+# In-memory: active conversation state only (lives for the duration of one
+# session; lost on restart, same as before). Streaks/completions/usage events
+# are persisted in Postgres now - see db.py - so they survive deploys.
 sessions = {}
-user_streaks = {}
-daily_completions = {}
 
 # Language code to full name mapping
 LANGUAGE_NAMES = {
@@ -537,7 +539,9 @@ Focus on the most impactful improvements that will help fluency, not minor error
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Language Learning API starting up...")
+    await db.init_db()
     yield
+    await db.close_db()
     print("👋 Language Learning API shutting down...")
 
 app = FastAPI(
@@ -652,7 +656,15 @@ async def start_session(data: SessionStart):
         }
         
         print(f"[SESSION START] Session created: {session_id}")
-        
+
+        await db.log_event(
+            data.user_id,
+            "session_started",
+            target_language=data.target_language,
+            session_id=session_id,
+            metadata={"topic": data.topic, "roleplay_id": roleplay_id, "has_custom_scenario": bool(custom_scenario)},
+        )
+
         return {
             "session_id": session_id,
             "greeting": greeting,
@@ -674,39 +686,43 @@ async def end_session(data: SessionEnd):
     session = sessions[data.session_id]
     session["completed"] = True
     session["total_speaking_time"] = data.total_speaking_time
-    
-    # Update streak
+
     user_id = session["user_id"]
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    if data.total_speaking_time >= 300:  # 5 minutes = 300 seconds
-        if user_id not in daily_completions:
-            daily_completions[user_id] = set()
-        daily_completions[user_id].add(today)
-        
-        # Update streak
-        user_streaks[user_id] = user_streaks.get(user_id, 0) + 1
-    
+    is_full_completion = data.total_speaking_time >= 300  # 5 minutes = 300 seconds
+
+    # record_completion is itself idempotent per calendar day (won't double-count
+    # a second session today) and resets to 1 on a missed day, so we can just call
+    # it whenever the day's goal was hit without tracking that ourselves here.
+    streak = await db.record_completion(user_id) if is_full_completion else (await db.get_user_stats(user_id))["streak"]
+
+    await db.log_event(
+        user_id,
+        "session_completed",
+        target_language=session.get("target_language"),
+        session_id=data.session_id,
+        metadata={"total_speaking_time": data.total_speaking_time, "hit_daily_goal": is_full_completion},
+    )
+
     # Generate feedback
     feedback = await generate_feedback(session)
-    
+
     return {
         "session_id": data.session_id,
         "total_speaking_time": data.total_speaking_time,
-        "completed": data.total_speaking_time >= 300,
+        "completed": is_full_completion,
         "feedback": feedback,
-        "streak": user_streaks.get(user_id, 0)
+        "streak": streak
     }
 
 @app.get("/api/user/{user_id}/stats")
 async def get_user_stats(user_id: str):
     """Get user statistics"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    completed_today = user_id in daily_completions and today in daily_completions[user_id]
-    
+    stats = await db.get_user_stats(user_id)
+    await db.log_event(user_id, "app_opened")
+
     return {
-        "streak": user_streaks.get(user_id, 0),
-        "completed_today": completed_today
+        "streak": stats["streak"],
+        "completed_today": stats["completed_today"]
     }
 
 # ============ Sentence Matching and Improvement ============
@@ -3414,12 +3430,13 @@ async def health_check():
         pass
     
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "service": "lingoa-api",
         "build_tag": APP_BUILD_TAG,
         "render_git_commit": os.getenv("RENDER_GIT_COMMIT"),
         "tts_provider": get_tts_provider_type(),
-        "elevenlabs_key_present": bool(os.getenv("ELEVENLABS_API_KEY"))
+        "elevenlabs_key_present": bool(os.getenv("ELEVENLABS_API_KEY")),
+        "db_connected": db.is_available(),
     }
 
 @app.get("/api/tts/status")
