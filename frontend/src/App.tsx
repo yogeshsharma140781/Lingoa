@@ -1,7 +1,9 @@
 import { useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
+import { Capacitor } from '@capacitor/core'
 import { useStore } from './store'
 import { useApi } from './hooks/useApi'
+import { cancelTonightReminder, listenForNotificationTaps, scheduleTonightReminder } from './hooks/useNotifications'
 import { HomeScreen } from './components/HomeScreen'
 import { ModeSelectionScreen } from './components/ModeSelectionScreen'
 import { TopicSelectionScreen } from './components/TopicSelectionScreen'
@@ -12,12 +14,31 @@ import { CompletionScreen } from './components/CompletionScreen'
 import { ImprovementsScreen } from './components/ImprovementsScreen'
 
 export default function App() {
-  const { currentScreen } = useStore()
-  const { fetchUserStats } = useApi()
+  const { currentScreen, completedToday, streak, targetLanguage, targetTime } = useStore()
+  const { fetchUserStats, logEvent } = useApi()
 
   useEffect(() => {
     fetchUserStats()
   }, [fetchUserStats])
+
+  // Keep tonight's reminder in sync with the latest known stats: cancel it the
+  // moment today's goal is hit, (re)schedule it otherwise. Re-runs whenever
+  // these change for any reason, not just on initial load.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    if (completedToday) {
+      cancelTonightReminder()
+    } else {
+      const targetMinutes = Math.round(targetTime / 60000)
+      scheduleTonightReminder({ streak, targetLanguage, targetMinutes })
+    }
+  }, [completedToday, streak, targetLanguage, targetTime])
+
+  // Register the notification-tap listener once. This is the one reliable
+  // signal that a reminder actually brought someone back into the app.
+  useEffect(() => {
+    return listenForNotificationTaps(() => logEvent('notification_tapped'))
+  }, [logEvent])
 
   return (
     <div className="h-full w-full animated-gradient overflow-hidden relative">

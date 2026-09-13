@@ -8,6 +8,8 @@ export function CompletionScreen() {
   const completedFull = speakingTime >= targetTime
   const minutes = Math.floor(speakingTime / 60000)
   const seconds = Math.floor((speakingTime % 60000) / 1000)
+  const targetMinutes = Math.round(targetTime / 60000)
+  const targetMinutesLabel = `${targetMinutes} minute${targetMinutes === 1 ? '' : 's'}`
 
   return (
     <motion.div
@@ -45,7 +47,7 @@ export function CompletionScreen() {
                 Amazing! 🎉
               </h1>
               <p className="text-surface-300 text-lg mb-2">
-                You spoke for 5 minutes straight!
+                You spoke for {minutes}:{seconds.toString().padStart(2, '0')} straight!
               </p>
             </>
           ) : (
@@ -57,7 +59,7 @@ export function CompletionScreen() {
                 You spoke for {minutes}:{seconds.toString().padStart(2, '0')}
               </p>
               <p className="text-surface-500 text-sm">
-                Complete 5 minutes to mark your daily goal
+                Complete {targetMinutesLabel} to mark your daily goal
               </p>
             </>
           )}

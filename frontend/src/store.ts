@@ -96,7 +96,7 @@ interface AppState {
 
   // Timer
   speakingTime: number // in milliseconds
-  targetTime: number // 5 minutes in ms
+  targetTime: number // daily goal, in ms
   incrementSpeakingTime: (ms: number) => void
   resetSpeakingTime: () => void
 
@@ -146,6 +146,11 @@ interface AppState {
   // Audio silent mode detection
   audioSilentMode: boolean
   setAudioSilentMode: (silent: boolean) => void
+
+  // Notification permission prompt: set right after a first goal-hit completion
+  // (in ConversationScreen), read on HomeScreen where the user lands next.
+  pendingNotificationPrompt: boolean
+  setPendingNotificationPrompt: (pending: boolean) => void
 
   // Reset
   resetSession: () => void
@@ -201,7 +206,7 @@ export const useStore = create<AppState>((set) => ({
 
   // Timer
   speakingTime: 0,
-  targetTime: 5 * 60 * 1000, // 5 minutes
+  targetTime: 1 * 60 * 1000, // 1 minute - matches backend's is_full_completion threshold (main.py)
   incrementSpeakingTime: (ms) => set((state) => ({
     speakingTime: Math.min(state.speakingTime + ms, state.targetTime)
   })),
@@ -264,6 +269,10 @@ export const useStore = create<AppState>((set) => ({
   // Audio silent mode detection
   audioSilentMode: false,
   setAudioSilentMode: (silent) => set({ audioSilentMode: silent }),
+
+  // Notification permission prompt
+  pendingNotificationPrompt: false,
+  setPendingNotificationPrompt: (pending) => set({ pendingNotificationPrompt: pending }),
 
   // Reset
   resetSession: () => set({

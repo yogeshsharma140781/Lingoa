@@ -1,22 +1,25 @@
 import { motion } from 'framer-motion'
 import { ArrowLeft, MessageSquare, Users } from 'lucide-react'
 import { useStore } from '../store'
-import { unlockAudio } from '../hooks/useApi'
+import { unlockAudio, useApi } from '../hooks/useApi'
 
 export function ModeSelectionScreen() {
   const { setScreen } = useStore()
+  const { logEvent } = useApi()
 
   const handleBack = () => {
     setScreen('home')
   }
 
   const handleTopics = () => {
+    logEvent('mode_selected', { mode: 'topics' })
     // Unlock audio in background (non-blocking)
     unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
     setScreen('topics')
   }
 
   const handleRoleplay = () => {
+    logEvent('mode_selected', { mode: 'roleplay' })
     // Unlock audio in background (non-blocking)
     unlockAudio().catch(err => console.warn('Audio unlock failed:', err))
     setScreen('roleplay')

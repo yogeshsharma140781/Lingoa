@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Flame, Play, ChevronDown, Check, Mic, Globe } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
 import { unlockAudio } from '../hooks/useApi'
+import { NotificationPrompt } from './NotificationPrompt'
 
 export function HomeScreen() {
   const {
@@ -11,11 +12,16 @@ export function HomeScreen() {
     completedToday,
     targetLanguage,
     setTargetLanguage,
+    targetTime,
+    pendingNotificationPrompt,
+    setPendingNotificationPrompt,
   } = useStore()
 
   const [showLanguages, setShowLanguages] = useState(false)
-  
+
   const currentLanguage = LANGUAGES.find(l => l.code === targetLanguage) || LANGUAGES[0]
+  const targetMinutes = Math.round(targetTime / 60000)
+  const targetMinutesLabel = `${targetMinutes} minute${targetMinutes === 1 ? '' : 's'}`
 
   return (
     <motion.div
@@ -69,7 +75,7 @@ export function HomeScreen() {
           <span className="text-gradient">Lingoa</span>
         </h1>
         <p className="text-surface-400 text-lg max-w-xs mb-8">
-          Practice language by speaking for 5 minutes. Every day. No lessons, just conversations.
+          Practice language by speaking for {targetMinutesLabel}. Every day. No lessons, just conversations.
         </p>
 
         {/* Language selector */}
@@ -128,9 +134,15 @@ export function HomeScreen() {
         </button>
 
         <p className="text-center text-surface-500 text-sm mt-4">
-          Speak for 5 minutes to complete your daily goal
+          Speak for {targetMinutesLabel} to complete your daily goal
         </p>
       </motion.div>
+
+      <AnimatePresence>
+        {pendingNotificationPrompt && (
+          <NotificationPrompt onDismiss={() => setPendingNotificationPrompt(false)} />
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }

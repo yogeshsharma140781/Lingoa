@@ -49,6 +49,18 @@ APP_BUILD_TAG = "translation-pending-gate-v3"
 # Supported language codes used in the app
 SUPPORTED_LANGUAGE_CODES = {"en", "es", "fr", "de", "nl", "it", "pt", "hi", "zh", "ja", "ko"}
 
+# Client-side usage events we accept via /api/events. An allowlist (rather than
+# logging whatever string a client sends) keeps the events table meaningful and
+# stops it from silently accumulating typo'd/one-off event names.
+ALLOWED_CLIENT_EVENT_TYPES = {
+    "mode_selected",
+    "mic_permission_granted",
+    "mic_permission_denied",
+    "notification_permission_granted",
+    "notification_permission_denied",
+    "notification_tapped",
+}
+
 # In-memory: active conversation state only (lives for the duration of one
 # session; lost on restart, same as before). Streaks/completions/usage events
 # are persisted in Postgres now - see db.py - so they survive deploys.
@@ -612,6 +624,12 @@ class TranslateRequest(BaseModel):
     source_language: str
     target_language: str = "en"
 
+class ClientEvent(BaseModel):
+    user_id: str
+    event_type: str
+    target_language: Optional[str] = None
+    metadata: Optional[dict] = None
+
 # ============ Session Management ============
 
 @app.post("/api/session/start")
@@ -688,7 +706,7 @@ async def end_session(data: SessionEnd):
     session["total_speaking_time"] = data.total_speaking_time
 
     user_id = session["user_id"]
-    is_full_completion = data.total_speaking_time >= 300  # 5 minutes = 300 seconds
+    is_full_completion = data.total_speaking_time >= 60  # daily goal = 1 minute of speaking
 
     # record_completion is itself idempotent per calendar day (won't double-count
     # a second session today) and resets to 1 on a missed day, so we can just call
@@ -724,6 +742,25 @@ async def get_user_stats(user_id: str):
         "streak": stats["streak"],
         "completed_today": stats["completed_today"]
     }
+
+@app.post("/api/events")
+async def log_client_event(data: ClientEvent):
+    """
+    Generic endpoint for client-side usage events that don't already have a
+    natural backend round-trip (e.g. picking a mode, a mic permission prompt
+    result) - unlike session_started/session_completed/app_opened, which are
+    logged as a side effect of their own real endpoints.
+    """
+    if data.event_type not in ALLOWED_CLIENT_EVENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown event_type: {data.event_type}")
+
+    await db.log_event(
+        data.user_id,
+        data.event_type,
+        target_language=data.target_language,
+        metadata=data.metadata,
+    )
+    return {"ok": True}
 
 # ============ Sentence Matching and Improvement ============
 

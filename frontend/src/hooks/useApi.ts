@@ -180,6 +180,31 @@ export function useApi() {
     }
   }, [userId, setUserStats])
 
+  // Fire-and-forget usage event logging (funnel steps that don't already have
+  // their own backend round-trip). Must never throw or block the UI - a failed
+  // analytics call is not something the user should ever notice.
+  const logEvent = useCallback((
+    eventType:
+      | 'mode_selected'
+      | 'mic_permission_granted'
+      | 'mic_permission_denied'
+      | 'notification_permission_granted'
+      | 'notification_permission_denied'
+      | 'notification_tapped',
+    metadata?: Record<string, unknown>
+  ) => {
+    fetch(`${API_BASE}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        event_type: eventType,
+        target_language: targetLanguage,
+        metadata,
+      }),
+    }).catch((err) => console.error('Failed to log event:', eventType, err))
+  }, [userId, targetLanguage])
+
   // Start a new session
   const startSession = useCallback(async () => {
     try {
@@ -777,6 +802,7 @@ export function useApi() {
 
   return {
     fetchUserStats,
+    logEvent,
     startSession,
     endSession,
     transcribeAudio,

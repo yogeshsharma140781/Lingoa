@@ -5,6 +5,7 @@ import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX, Languages } from 'lucide
 import { useStore } from '../store'
 import { useApi, unlockAudio } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
+import { cancelTonightReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { CorrectionCard } from './CorrectionCard'
 import { TranslationCard } from './TranslationCard'
 import { YouMeantCard } from './YouMeantCard'
@@ -47,18 +48,20 @@ export function ConversationScreen() {
     setAudioSilentMode,
     conversationHistory,
     addMessage,
+    setPendingNotificationPrompt,
   } = useStore()
 
-  const { 
-    startSession, 
-    endSession, 
-    transcribeAudio, 
+  const {
+    startSession,
+    endSession,
+    transcribeAudio,
     transcribeAudioChunk,
-    getAiResponse, 
-    textToSpeech, 
+    getAiResponse,
+    textToSpeech,
     translateText,
     analyzeUserSpeech,
     clearCorrection,
+    logEvent,
   } = useApi()
 
   const targetLanguage = useStore((s) => s.targetLanguage)
@@ -244,6 +247,7 @@ export function ConversationScreen() {
         console.log('[Permission] Permission granted!')
         setPermissionState('granted')
         setMicPermission('granted')
+        logEvent('mic_permission_granted')
       } else {
         console.log('[Permission] Web/Android detected, requesting getUserMedia...')
         // Web/Android
@@ -258,6 +262,7 @@ export function ConversationScreen() {
         console.log('[Permission] Permission granted!')
         setPermissionState('granted')
         setMicPermission('granted')
+        logEvent('mic_permission_granted')
       }
     } catch (err: any) {
       clearTimeout(timeoutId)
@@ -272,6 +277,7 @@ export function ConversationScreen() {
         // User must re-enable in Settings.
         setPermissionState('denied')
         setMicPermission('denied')
+        logEvent('mic_permission_denied')
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         console.log('[Permission] No microphone found')
         // No microphone found (common on simulator)
@@ -289,7 +295,7 @@ export function ConversationScreen() {
         setMicPermission('denied')
       }
     }
-  }, [setMicPermission])
+  }, [setMicPermission, logEvent])
 
   // Handle "Done" - triggered either by tapping the button or by auto-submit
   // after a pause in speech. Guarded so both paths can't double-fire.
@@ -399,7 +405,16 @@ export function ConversationScreen() {
     try {
       stopRecording()
       if (speakingTime > 0) {
-        await endSession(speakingTime)
+        const result = await endSession(speakingTime)
+        if (result?.completed) {
+          // They just hit today's goal - no need to remind them tonight.
+          cancelTonightReminder()
+          // First time ever hitting the goal: offer the reminder opt-in, right
+          // at the moment they've just felt the product work.
+          if (Capacitor.isNativePlatform() && !hasSeenNotificationPrompt()) {
+            setPendingNotificationPrompt(true)
+          }
+        }
       }
       resetSession()
       setScreen('home')
