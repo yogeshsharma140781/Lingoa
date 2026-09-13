@@ -38,29 +38,21 @@ LANGUAGE_VOICE_SETTINGS: Dict[str, ElevenLabsVoiceSettings] = {
     # Add more language-specific settings as needed
 }
 
-# ElevenLabs Multilingual Voice IDs
-# Using known multilingual voices that support multiple languages
-# These are default ElevenLabs voices that work across languages
+# ElevenLabs Voice IDs - one dedicated voice per target language (each added to
+# this account's Voice Library), replacing the single shared voice used for
+# every language before. Verified against the ElevenLabs API before wiring in.
 ELEVENLABS_VOICE_MAP = {
-    # Using Rachel (21m00Tcm4TlvDq8ikWAM) - warm, multilingual, conversational
-    # Alternative: Bella (EXAVITQu4vr4xnSDxMaL) or Domi (AZnzlk1XvdvUeBnXmlld)
-    "hi": "21m00Tcm4TlvDq8ikWAM",  # Rachel - multilingual
-    "es": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "fr": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "de": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "nl": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "it": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "pt": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "zh": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "ja": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "ko": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "en": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-}
-
-# Alternative voices to try if default doesn't sound good
-ELEVENLABS_ALTERNATIVE_VOICES = {
-    "hi": "EXAVITQu4vr4xnSDxMaL",  # Sarah - also multilingual
-    "en": "21m00Tcm4TlvDq8ikWAM",  # Rachel - warm English voice
+    "hi": "sTuFDs5r9KT8f6JSiJbq",  # Monika Sogam - Persuasive Outbound Caller
+    "nl": "OlBRrVAItyi00MuGMbna",  # Emma - Calm, Clear and Confident
+    "es": "gD1IexrzCvsXPHUuT0s3",  # Sara Martin - Young and Reflective
+    "en": "56AoDkrOh6qfVPDXZ7Pt",  # Cassidy - Crisp, Direct and Clear
+    "fr": "YxrwjAKoUKULGd0g8K9Y",  # Lucie - Support Agent (female, replacing Adam which was male)
+    "de": "NE7AIW5DoJ7lUosXV2KR",  # Ela - Cheerful and Happy
+    "it": "QITiGyM4owEZrBEf0QV8",  # Ginevra - Rich, Cheerful and Grounded
+    "pt": "cyD08lEy76q03ER1jZ7y",  # Scheila - Serious and Direct
+    "zh": "bhJUNIXWQQ94l8eI2VUf",  # Amy - Friendly, Young and Natural
+    "ja": "8PfKHL4nZToWC3pbz9U9",  # Rose - Inviting, Clear and Steady
+    "ko": "8jHHF8rMqMlg8if2mOUe",  # Han - Conversational
 }
 
 # ============ Text Pre-processing ============
