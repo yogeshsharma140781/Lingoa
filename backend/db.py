@@ -76,7 +76,14 @@ def is_available() -> bool:
 
 
 async def get_user_stats(user_id: str) -> dict:
-    """Returns {"streak": int, "completed_today": bool}. Falls back to zeros if DB is unavailable."""
+    """
+    Returns {"streak": int, "completed_today": bool}. Falls back to zeros if DB is unavailable.
+
+    The streak returned is the *effective* one: the stored value only changes when a
+    session is completed, so once a full day has been missed (last completion before
+    yesterday) the stored number is stale. Report 0 then, so the Home screen and
+    reminder text never claim a streak that's already gone.
+    """
     if not _pool:
         return {"streak": 0, "completed_today": False}
     try:
@@ -86,8 +93,11 @@ async def get_user_stats(user_id: str) -> dict:
             )
         if not row:
             return {"streak": 0, "completed_today": False}
-        completed_today = row["last_completed_date"] == date.today()
-        return {"streak": row["streak"], "completed_today": completed_today}
+        today = date.today()
+        last = row["last_completed_date"]
+        completed_today = last == today
+        streak_alive = last is not None and last >= today - timedelta(days=1)
+        return {"streak": row["streak"] if streak_alive else 0, "completed_today": completed_today}
     except Exception as e:
         print(f"[DB] get_user_stats failed: {e}")
         return {"streak": 0, "completed_today": False}

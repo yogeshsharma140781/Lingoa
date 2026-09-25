@@ -1,15 +1,6 @@
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { Capacitor } from '@capacitor/core'
-
-// Fixed notification id for "tonight's reminder" - scheduling with the same id
-// replaces any previously pending one instead of stacking duplicates, so we
-// never need to track "did I already schedule one today" ourselves.
-const TONIGHT_REMINDER_ID = 1001
-
-// The hour (24h, local device time) the reminder fires at, if the goal isn't
-// hit yet by then. Local notifications use the device's own clock, so this is
-// correct per-user local time with no timezone tracking on our end.
-const REMINDER_HOUR = 20
+import { REMINDER_DAYS, buildReminderPlan, reminderIdForDate } from './reminderPlan'
 
 export const NOTIF_PROMPT_SEEN_KEY = 'lingoa_notif_prompt_seen'
 
@@ -27,6 +18,15 @@ export function markNotificationPromptSeen(): void {
   } catch {
     // ignore - worst case we ask again next time
   }
+}
+
+// Small display-name map for reminder copy - the store's LANGUAGES list carries
+// this too, but importing it here would pull the whole store module into a
+// helper that doesn't otherwise need it. Kept in sync by hand; new languages
+// are added rarely.
+const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
+  en: 'English', es: 'Spanish', fr: 'French', de: 'German', nl: 'Dutch',
+  it: 'Italian', pt: 'Portuguese', hi: 'Hindi', zh: 'Chinese', ja: 'Japanese', ko: 'Korean',
 }
 
 /**
@@ -57,68 +57,71 @@ async function isPermissionGranted(): Promise<boolean> {
   }
 }
 
-function buildReminderCopy(streak: number, targetLanguage: string, targetMinutes: number) {
-  const langName = LANGUAGE_DISPLAY_NAMES[targetLanguage] || targetLanguage
-  if (streak > 0) {
-    return {
-      title: 'Keep your streak alive 🔥',
-      body: `Don't lose your ${streak}-day streak — ${targetMinutes} min of ${langName} left today.`,
-    }
-  }
-  return {
-    title: 'Time to talk?',
-    body: `Got a minute? Your ${langName} partner's ready when you are.`,
-  }
-}
-
-// Small display-name map for reminder copy - the store's LANGUAGES list carries
-// this too, but importing it here would pull the whole store module into a
-// helper that doesn't otherwise need it. Kept intentionally in sync by hand;
-// low-risk since new languages are added rarely.
-const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
-  en: 'English', es: 'Spanish', fr: 'French', de: 'German', nl: 'Dutch',
-  it: 'Italian', pt: 'Portuguese', hi: 'Hindi', zh: 'Chinese', ja: 'Japanese', ko: 'Korean',
-}
+// Syncs can be triggered from several places at once (app start, stats arriving,
+// resume, opt-in). Run them one at a time so a cancel from one can't land in the
+// middle of another's schedule.
+let syncQueue: Promise<void> = Promise.resolve()
 
 /**
- * (Re)schedules tonight's reminder for REMINDER_HOUR local time, replacing any
- * previously scheduled one. No-ops if permission isn't granted, or if
- * REMINDER_HOUR has already passed today (nothing left to remind about).
+ * Makes the OS's pending reminders match the current state: the next week of
+ * 8pm evenings, minus today's if the goal is already done. Safe to call as often
+ * as you like - it always cancels the whole window first, then re-schedules.
+ *
+ * Because these are OS-level timers, an evening on which the app is never opened
+ * still gets its reminder. That's the case a single same-day reminder missed.
  */
-export async function scheduleTonightReminder(params: {
+export function syncReminders(params: {
   streak: number
+  completedToday: boolean
   targetLanguage: string
   targetMinutes: number
 }): Promise<void> {
-  if (!(await isPermissionGranted())) return
+  syncQueue = syncQueue.then(async () => {
+    if (!(await isPermissionGranted())) return
 
-  const now = new Date()
-  const at = new Date(now)
-  at.setHours(REMINDER_HOUR, 0, 0, 0)
-  if (at.getTime() <= now.getTime()) {
-    // Already past tonight's reminder time - nothing to schedule for today.
-    return
-  }
-
-  const { title, body } = buildReminderCopy(params.streak, params.targetLanguage, params.targetMinutes)
-
-  try {
-    await LocalNotifications.schedule({
-      notifications: [{ id: TONIGHT_REMINDER_ID, title, body, schedule: { at } }],
+    const now = new Date()
+    const plan = buildReminderPlan({
+      now,
+      streak: params.streak,
+      completedToday: params.completedToday,
+      languageName: LANGUAGE_DISPLAY_NAMES[params.targetLanguage] || params.targetLanguage,
+      targetMinutes: params.targetMinutes,
     })
-  } catch (err) {
-    console.error('[Notifications] schedule failed:', err)
-  }
+
+    // Cancel the whole window (not just what we're about to schedule) so a day
+    // that should no longer have a reminder - today's, once the goal is hit -
+    // doesn't keep the one scheduled earlier.
+    const windowIds = Array.from({ length: REMINDER_DAYS }, (_, offset) => {
+      const d = new Date(now)
+      d.setDate(d.getDate() + offset)
+      return { id: reminderIdForDate(d) }
+    })
+
+    try {
+      await LocalNotifications.cancel({ notifications: windowIds })
+      if (plan.length > 0) {
+        await LocalNotifications.schedule({
+          notifications: plan.map((r) => ({ id: r.id, title: r.title, body: r.body, schedule: { at: r.at } })),
+        })
+      }
+    } catch (err) {
+      console.error('[Notifications] sync failed:', err)
+    }
+  })
+  return syncQueue
 }
 
-/** Cancels tonight's reminder - call the moment the daily goal is actually hit. */
-export async function cancelTonightReminder(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return
-  try {
-    await LocalNotifications.cancel({ notifications: [{ id: TONIGHT_REMINDER_ID }] })
-  } catch (err) {
-    console.error('[Notifications] cancel failed:', err)
-  }
+/** Cancels today's reminder immediately - call the moment the daily goal is hit. */
+export function cancelTodayReminder(): Promise<void> {
+  syncQueue = syncQueue.then(async () => {
+    if (!Capacitor.isNativePlatform()) return
+    try {
+      await LocalNotifications.cancel({ notifications: [{ id: reminderIdForDate(new Date()) }] })
+    } catch (err) {
+      console.error('[Notifications] cancel failed:', err)
+    }
+  })
+  return syncQueue
 }
 
 /**

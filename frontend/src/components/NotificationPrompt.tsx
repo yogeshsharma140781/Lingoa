@@ -5,14 +5,14 @@ import { useApi } from '../hooks/useApi'
 import {
   markNotificationPromptSeen,
   requestNotificationPermission,
-  scheduleTonightReminder,
+  syncReminders,
 } from '../hooks/useNotifications'
 
 // Custom pre-permission screen, shown once right after a user's first
 // completed daily goal. iOS won't re-prompt after a real OS-level denial, so
 // we ask softly here first - only "Enable" triggers the actual system dialog.
 export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
-  const { streak, targetLanguage, targetTime } = useStore()
+  const { streak, completedToday, targetLanguage, targetTime } = useStore()
   const { logEvent } = useApi()
   const targetMinutes = Math.round(targetTime / 60000)
 
@@ -25,7 +25,7 @@ export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
     const granted = await requestNotificationPermission()
     logEvent(granted ? 'notification_permission_granted' : 'notification_permission_denied')
     if (granted) {
-      await scheduleTonightReminder({ streak, targetLanguage, targetMinutes })
+      await syncReminders({ streak, completedToday, targetLanguage, targetMinutes })
     }
     finish()
   }

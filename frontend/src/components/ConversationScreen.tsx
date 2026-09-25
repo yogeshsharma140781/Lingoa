@@ -5,7 +5,7 @@ import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX, Languages } from 'lucide
 import { useStore } from '../store'
 import { useApi, unlockAudio } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
-import { cancelTonightReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
+import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { CorrectionCard } from './CorrectionCard'
 import { TranslationCard } from './TranslationCard'
 import { YouMeantCard } from './YouMeantCard'
@@ -408,7 +408,7 @@ export function ConversationScreen() {
         const result = await endSession(speakingTime)
         if (result?.completed) {
           // They just hit today's goal - no need to remind them tonight.
-          cancelTonightReminder()
+          cancelTodayReminder()
           // First time ever hitting the goal: offer the reminder opt-in, right
           // at the moment they've just felt the product work.
           if (Capacitor.isNativePlatform() && !hasSeenNotificationPrompt()) {

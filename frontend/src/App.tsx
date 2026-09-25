@@ -3,7 +3,8 @@ import { AnimatePresence } from 'framer-motion'
 import { Capacitor } from '@capacitor/core'
 import { useStore } from './store'
 import { useApi } from './hooks/useApi'
-import { cancelTonightReminder, listenForNotificationTaps, scheduleTonightReminder } from './hooks/useNotifications'
+import { App as CapacitorApp } from '@capacitor/app'
+import { listenForNotificationTaps, syncReminders } from './hooks/useNotifications'
 import { HomeScreen } from './components/HomeScreen'
 import { ModeSelectionScreen } from './components/ModeSelectionScreen'
 import { TopicSelectionScreen } from './components/TopicSelectionScreen'
@@ -21,18 +22,39 @@ export default function App() {
     fetchUserStats()
   }, [fetchUserStats])
 
-  // Keep tonight's reminder in sync with the latest known stats: cancel it the
-  // moment today's goal is hit, (re)schedule it otherwise. Re-runs whenever
-  // these change for any reason, not just on initial load.
+  // Keep the pending reminders (the next week of evenings) in sync with the
+  // latest known stats. Re-runs whenever these change for any reason.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return
-    if (completedToday) {
-      cancelTonightReminder()
-    } else {
-      const targetMinutes = Math.round(targetTime / 60000)
-      scheduleTonightReminder({ streak, targetLanguage, targetMinutes })
-    }
+    syncReminders({
+      streak,
+      completedToday,
+      targetLanguage,
+      targetMinutes: Math.round(targetTime / 60000),
+    })
   }, [completedToday, streak, targetLanguage, targetTime])
+
+  // iOS keeps the app alive in the background, so a cold start isn't the only
+  // way back in. On resume, re-fetch stats (the day may have rolled over) and
+  // re-sync explicitly, since unchanged stats wouldn't re-trigger the effect
+  // above - and the window of scheduled evenings needs topping up regardless.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    const handlePromise = CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
+      if (!isActive) return
+      await fetchUserStats()
+      const s = useStore.getState()
+      syncReminders({
+        streak: s.streak,
+        completedToday: s.completedToday,
+        targetLanguage: s.targetLanguage,
+        targetMinutes: Math.round(s.targetTime / 60000),
+      })
+    })
+    return () => {
+      handlePromise.then((handle) => handle.remove()).catch(() => {})
+    }
+  }, [fetchUserStats])
 
   // Register the notification-tap listener once. This is the one reliable
   // signal that a reminder actually brought someone back into the app.

@@ -291,7 +291,9 @@ export function useApi() {
 
       if (res.ok) {
         const data = await res.json()
-        setUserStats(data.streak, data.completed)
+        // data.completed only says whether THIS session hit the goal. If the goal
+        // was already hit earlier today, a shorter session must not flip it back.
+        setUserStats(data.streak, data.completed || useStore.getState().completedToday)
         if (data.feedback?.improvements) {
           setImprovements(data.feedback.improvements as Improvement[])
         }
