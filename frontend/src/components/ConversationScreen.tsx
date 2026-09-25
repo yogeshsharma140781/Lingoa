@@ -972,8 +972,10 @@ export function ConversationScreen() {
         {/* Status indicator + Done button row */}
         <div className="flex items-center justify-center gap-4 mb-4">
           {/* Subtle status indicator */}
-          <motion.div 
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+          {/* Fixed size (sized for the longest label, "Got it, sending...") so
+              switching between Ready / Listening / Processing never resizes it */}
+          <motion.div
+            className={`flex items-center justify-center gap-2 w-48 h-9 px-3 whitespace-nowrap rounded-full ${
               isWaitingForUser && !isAiSpeaking && !isProcessing
                 ? 'bg-primary-500/20 border border-primary-500/30'
                 : isAiSpeaking
@@ -1035,18 +1037,23 @@ export function ConversationScreen() {
             )}
           </motion.div>
 
-          {/* Done button - only show when waiting for user */}
-          {isWaitingForUser && !isAiSpeaking && !isProcessing && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              onClick={handleDone}
-              className="flex items-center gap-2 btn-primary rounded-full px-6 py-2.5 font-semibold text-white shadow-lg"
-            >
-              <Send className="w-4 h-4" />
-              Done
-            </motion.button>
-          )}
+          {/* Done button - only shown when waiting for user. Its slot is always
+              reserved at the button's full size, so showing/hiding it doesn't
+              re-center the status pill or change the row's height (which used to
+              shove the progress bar and timer up and down). */}
+          <div className="w-28 h-11 shrink-0 flex items-center justify-center">
+            {isWaitingForUser && !isAiSpeaking && !isProcessing && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onClick={handleDone}
+                className="flex items-center justify-center gap-2 w-full h-full btn-primary rounded-full font-semibold text-white shadow-lg"
+              >
+                <Send className="w-4 h-4" />
+                Done
+              </motion.button>
+            )}
+          </div>
         </div>
 
         {/* Progress bar */}
