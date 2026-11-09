@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Flame, Play, ChevronDown, Check, Mic, Globe } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
 import { unlockAudio } from '../hooks/useApi'
 import { NotificationPrompt } from './NotificationPrompt'
+import { wrapUpMessage } from '../encouragement'
 
 export function HomeScreen() {
   const {
@@ -15,12 +16,24 @@ export function HomeScreen() {
     targetTime,
     pendingNotificationPrompt,
     setPendingNotificationPrompt,
+    sessionWrapUp,
+    setSessionWrapUp,
   } = useStore()
 
   const [showLanguages, setShowLanguages] = useState(false)
 
+  // The kind word from the conversation they just left fades on its own.
+  useEffect(() => {
+    if (!sessionWrapUp) return
+    const id = window.setTimeout(() => setSessionWrapUp(null), 7000)
+    return () => window.clearTimeout(id)
+  }, [sessionWrapUp, setSessionWrapUp])
+
   const currentLanguage = LANGUAGES.find(l => l.code === targetLanguage) || LANGUAGES[0]
   const targetMinutes = Math.round(targetTime / 60000)
+  const wrapUpText = sessionWrapUp
+    ? wrapUpMessage(sessionWrapUp, LANGUAGES.find(l => l.code === sessionWrapUp.languageCode)?.name ?? 'your language')
+    : null
   const targetMinutesLabel = `${targetMinutes} minute${targetMinutes === 1 ? '' : 's'}`
 
   return (
@@ -137,6 +150,24 @@ export function HomeScreen() {
           Speak for {targetMinutesLabel} to complete your daily goal
         </p>
       </motion.div>
+
+      {/* Kind word after a conversation (skipped when the reminder prompt is up, which has its own moment) */}
+      <AnimatePresence>
+        {sessionWrapUp && !pendingNotificationPrompt && (
+          <motion.button
+            key="wrap-up"
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            onClick={() => setSessionWrapUp(null)}
+            className="absolute top-28 inset-x-6 z-20 glass rounded-2xl px-4 py-3 text-left border border-accent-500/30"
+            type="button"
+          >
+            <p className="text-accent-400 text-sm font-semibold">{wrapUpText?.title}</p>
+            <p className="text-surface-200 text-sm mt-0.5">{wrapUpText?.body}</p>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {pendingNotificationPrompt && (

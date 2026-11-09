@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Capacitor } from '@capacitor/core'
-import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX, Languages } from 'lucide-react'
+import { X, Gauge, MicOff, Mic, Send, Loader2, VolumeX, Languages, History, Volume2, Lightbulb, Sparkles } from 'lucide-react'
 import { useStore } from '../store'
-import { useApi, unlockAudio } from '../hooks/useApi'
+import { useApi, unlockAudio, type ReplySuggestion } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
+import { isPraiseworthy, pickPraise, goalPraise, type Praise } from '../encouragement'
+import { VAD_PAUSE_MS, GRACE_MS, SUGGESTIONS_AUTO_OPEN_MS, silenceWaitMs } from '../hooks/turnTiming'
 import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { CorrectionCard } from './CorrectionCard'
 import { TranslationCard } from './TranslationCard'
@@ -12,14 +14,6 @@ import { YouMeantCard } from './YouMeantCard'
 
 // Speed options (UI labels - actual speed is mapped in useApi)
 const SPEED_OPTIONS = [0.8, 0.9, 1.0]
-
-// After this much continued silence following speech, automatically submit the
-// turn (same as tapping Done), so users don't have to remember to tap it.
-// Combined with useVoiceActivity's own ~600ms silence debounce (which flips
-// isSpeaking to false), the total pause before auto-submit is roughly 2s -
-// enough for a learner to take a breath or think mid-sentence without
-// triggering early, but not so long it feels unresponsive.
-const AUTO_SUBMIT_SILENCE_MS = 1400
 
 export function ConversationScreen() {
   const {
@@ -49,6 +43,7 @@ export function ConversationScreen() {
     conversationHistory,
     addMessage,
     setPendingNotificationPrompt,
+    setSessionWrapUp,
   } = useStore()
 
   const {
@@ -62,6 +57,7 @@ export function ConversationScreen() {
     analyzeUserSpeech,
     clearCorrection,
     logEvent,
+    getSuggestions,
   } = useApi()
 
   const targetLanguage = useStore((s) => s.targetLanguage)
@@ -73,25 +69,46 @@ export function ConversationScreen() {
   const [startError, setStartError] = useState<string | null>(null)
   const [aiTranslationOpen, setAiTranslationOpen] = useState<{ source: string; translation: string } | null>(null)
   const [aiTranslationLoading, setAiTranslationLoading] = useState(false)
-  const [autoSubmitPending, setAutoSubmitPending] = useState(false) // true while counting down to auto-submit after a pause
+  const [autoSubmitPending, setAutoSubmitPending] = useState(false) // true while waiting out a pause before auto-submit
+  const [inGrace, setInGrace] = useState(false) // the last second before auto-submit: speaking again cancels it
+  const [turnStarted, setTurnStarted] = useState(false) // user has said something in the current turn
+  const [showHistory, setShowHistory] = useState(false)
+  const [praise, setPraise] = useState<Praise | null>(null) // a cheer after a real attempt in the target language
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [helpDismissed, setHelpDismissed] = useState(false) // user closed the suggestions for this AI message
+  // items === null means "still loading"
+  const [suggestions, setSuggestions] = useState<{ forText: string; items: ReplySuggestion[] | null } | null>(null)
 
   const initRef = useRef(false)
   const isClosingRef = useRef(false) // Prevent multiple close clicks
-  const chatEndRef = useRef<HTMLDivElement>(null) // For auto-scrolling chat
-  const chatScrollRef = useRef<HTMLDivElement>(null) // Scroll container (avoid scrollIntoView on iOS)
-  const hasAutoScrolledRef = useRef(false)
+  const chatScrollRef = useRef<HTMLDivElement>(null) // Scroll container for the "Earlier" sheet (avoid scrollIntoView on iOS)
   const chunkBusyRef = useRef(false)
   const lastChunkTsRef = useRef(0)
   const aiTranslationCacheRef = useRef<Map<string, string>>(new Map())
   const hasSpokenThisTurnRef = useRef(false) // Has the user said anything yet in the current "waiting for user" turn?
   const isHandlingDoneRef = useRef(false) // Synchronous re-entrancy guard (manual tap + auto-submit can race)
-  const handleDoneRef = useRef<() => void>(() => {}) // Always points at the latest handleDone; set below
-  
-  // CorrectionCard manages its own expanded state, we just need a callback
-  const handleCorrectionExpandChange = useCallback((_expanded: boolean) => {
-    // No-op: CorrectionCard manages its own state
-  }, [])
+  const handleDoneRef = useRef<(trigger?: 'auto' | 'manual', silenceWaitMs?: number | null) => void>(() => {}) // Always points at the latest handleDone; set below
+  const turnSpeechMsRef = useRef(0) // How long the user has actually spoken in the current turn
+  const graceActiveRef = useRef(false) // In the "sending..." grace window right now
+  const graceCancelsRef = useRef(0) // How many times speaking again cancelled a send this turn
+  const goalCelebratedRef = useRef(false) // Already cheered the daily goal in this session
 
+  const lastAiText = [...conversationHistory].reverse().find((m) => m.role === 'assistant')?.content ?? ''
+  const lastUserText = [...conversationHistory].reverse().find((m) => m.role === 'user')?.content ?? ''
+  // What the user sees as "You said": live/partial transcript while it exists,
+  // otherwise their last finished turn (so it doesn't vanish when the AI answers).
+  const shownTranscript = userTranscript || lastUserText
+
+  // Start of a fresh "waiting for the user" turn.
+  const resetTurnState = useCallback(() => {
+    hasSpokenThisTurnRef.current = false
+    turnSpeechMsRef.current = 0
+    graceCancelsRef.current = 0
+    graceActiveRef.current = false
+    setTurnStarted(false)
+    setInGrace(false)
+  }, [])
+  
   const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios'
 
   const openAppSettings = useCallback(async () => {
@@ -197,7 +214,7 @@ export function ConversationScreen() {
         }
         
         // Start recording and set waiting for user
-        hasSpokenThisTurnRef.current = false
+        resetTurnState()
         startRecording()
         setIsWaitingForUser(true)
       } else {
@@ -210,7 +227,7 @@ export function ConversationScreen() {
       setStartError(error.message || 'Failed to start conversation. Please try again.')
       initRef.current = false // Allow retry
     }
-  }, [resetSpeakingTime, setUserTranscript, setIsProcessing, setStartError, startSession, textToSpeech, startRecording, setIsWaitingForUser])
+  }, [resetSpeakingTime, setUserTranscript, setIsProcessing, setStartError, startSession, textToSpeech, startRecording, setIsWaitingForUser, resetTurnState])
 
   // Request microphone permission - use useCallback to ensure stable reference
   const requestMicPermission = useCallback(async () => {
@@ -299,10 +316,27 @@ export function ConversationScreen() {
 
   // Handle "Done" - triggered either by tapping the button or by auto-submit
   // after a pause in speech. Guarded so both paths can't double-fire.
-  const handleDone = async () => {
+  const handleDone = async (trigger: 'auto' | 'manual' = 'manual', silenceWaitMs: number | null = null) => {
     if (isProcessing || isAiSpeaking || isHandlingDoneRef.current) return
     isHandlingDoneRef.current = true
     setAutoSubmitPending(false)
+    setInGrace(false)
+
+    // Snapshot the shape of this turn now; the event is logged once we know how
+    // much they actually said (so we can see if short submissions are cut-offs).
+    const turnSpeechMs = Math.round(turnSpeechMsRef.current)
+    const graceCancels = graceCancelsRef.current
+    const logTurn = (text: string) => {
+      const trimmed = text.trim()
+      logEvent('turn_submitted', {
+        trigger,
+        speech_ms: turnSpeechMs,
+        silence_wait_ms: silenceWaitMs,
+        grace_cancels: graceCancels,
+        word_count: trimmed ? trimmed.split(/\s+/).length : 0,
+        char_count: trimmed.length,
+      })
+    }
 
     setIsWaitingForUser(false)
     setIsProcessing(true)
@@ -323,6 +357,7 @@ export function ConversationScreen() {
         
         if (transcription?.text && transcription.text.trim()) {
           const transcript = transcription.text
+          logTurn(transcript)
           setUserTranscript(transcript)
           clearCorrection() // Clear any previous correction
           
@@ -332,6 +367,19 @@ export function ConversationScreen() {
           const looksEnglish = /\b(i|you|we|they|my|your|dont|don't|didn't|cant|can't|won't|wont|not)\b/i.test(transcript)
           if (!(targetLanguage !== 'en' && looksEnglish)) {
             analyzeUserSpeech(transcript)
+
+            // They said something real in the target language: a little encouragement.
+            // The first time they reach the daily goal this session gets a bigger one.
+            if (isPraiseworthy(transcript, targetLanguage)) {
+              const { speakingTime: spokenMs, targetTime: goalMs } = useStore.getState()
+              if (spokenMs >= goalMs && !goalCelebratedRef.current) {
+                goalCelebratedRef.current = true
+                const goalMinutes = Math.round(goalMs / 60000)
+                setPraise(goalPraise(targetLanguage, `${goalMinutes} minute${goalMinutes === 1 ? '' : 's'}`))
+              } else {
+                setPraise(pickPraise(targetLanguage))
+              }
+            }
           }
           
           // No filler sounds while thinking
@@ -368,6 +416,7 @@ export function ConversationScreen() {
           }
         } else {
           console.warn('[handleDone] No speech detected in transcription result:', transcription)
+          logTurn('')
           setUserTranscript('(No speech detected)')
           await new Promise(r => setTimeout(r, 1000))
           setUserTranscript('')
@@ -378,6 +427,7 @@ export function ConversationScreen() {
       }
     } else {
       console.warn('[handleDone] No audio blob or empty blob:', blob?.size, 'bytes')
+      logTurn('')
       setUserTranscript('(No audio recorded)')
       await new Promise(r => setTimeout(r, 1000))
       setUserTranscript('')
@@ -386,7 +436,7 @@ export function ConversationScreen() {
       setIsProcessing(false)
 
       // Restart recording for next turn
-      hasSpokenThisTurnRef.current = false
+      resetTurnState()
       startRecording()
       setIsWaitingForUser(true)
       isHandlingDoneRef.current = false
@@ -405,6 +455,8 @@ export function ConversationScreen() {
     try {
       stopRecording()
       if (speakingTime > 0) {
+        // Leave them with a kind word on the home screen.
+        setSessionWrapUp({ speakingMs: speakingTime, hitGoal: speakingTime >= targetTime, languageCode: targetLanguage })
         const result = await endSession(speakingTime)
         if (result?.completed) {
           // They just hit today's goal - no need to remind them tonight.
@@ -440,6 +492,7 @@ export function ConversationScreen() {
       // Only increment when user is speaking (not AI, not processing)
       if (isSpeaking && !isAiSpeaking && !isProcessing) {
         incrementSpeakingTime(100) // Increment by 100ms every 100ms
+        turnSpeechMsRef.current += 100
       }
     }, 100) // Update every 100ms for smooth progress
     
@@ -449,15 +502,28 @@ export function ConversationScreen() {
   // Auto-submit the turn after a pause in speech, so users don't have to
   // remember to tap "Done". Tapping Done manually still works and takes
   // priority (handleDone is re-entrancy-guarded against both firing).
+  //
+  // Two stages (see turnTiming.ts): a silence wait, then a one-second grace
+  // window where the pill says "Got it, sending..." but nothing has been sent -
+  // speaking again in that second cancels the send and the recording simply
+  // carries on, so a learner pausing mid-sentence isn't cut off.
   useEffect(() => {
     if (!isWaitingForUser || isAiSpeaking || isProcessing) {
+      graceActiveRef.current = false
+      setInGrace(false)
       setAutoSubmitPending(false)
       return
     }
 
     if (isSpeaking) {
       // User is talking - remember it, and don't count silence yet.
+      if (graceActiveRef.current) {
+        graceCancelsRef.current += 1
+        graceActiveRef.current = false
+      }
       hasSpokenThisTurnRef.current = true
+      setTurnStarted(true)
+      setInGrace(false)
       setAutoSubmitPending(false)
       return
     }
@@ -467,14 +533,36 @@ export function ConversationScreen() {
       return
     }
 
-    // Silence after speech: start (or continue) the countdown to auto-submit.
+    // Silence after speech. isSpeaking already went false after VAD_PAUSE_MS of
+    // silence, so only the remainder is left to wait.
     setAutoSubmitPending(true)
-    const timerId = window.setTimeout(() => {
-      handleDoneRef.current()
-    }, AUTO_SUBMIT_SILENCE_MS)
+    const totalWaitMs = silenceWaitMs(turnSpeechMsRef.current)
+    let graceTimerId: number | undefined
+    const silenceTimerId = window.setTimeout(() => {
+      graceActiveRef.current = true
+      setInGrace(true)
+      graceTimerId = window.setTimeout(() => {
+        graceActiveRef.current = false
+        handleDoneRef.current('auto', totalWaitMs)
+      }, GRACE_MS)
+    }, Math.max(0, totalWaitMs - VAD_PAUSE_MS))
 
-    return () => window.clearTimeout(timerId)
+    return () => {
+      window.clearTimeout(silenceTimerId)
+      if (graceTimerId !== undefined) window.clearTimeout(graceTimerId)
+    }
   }, [isSpeaking, isWaitingForUser, isAiSpeaking, isProcessing])
+
+  // The cheer has done its job once they start their next answer.
+  useEffect(() => {
+    if (turnStarted) setPraise(null)
+  }, [turnStarted])
+
+  // New AI message -> suggestions start fresh (closed, and not "dismissed").
+  useEffect(() => {
+    setSuggestionsOpen(false)
+    setHelpDismissed(false)
+  }, [lastAiText])
 
   // Start conversation when permission is granted
   useEffect(() => {
@@ -490,26 +578,15 @@ export function ConversationScreen() {
     }
   }, [permissionState, isInitialized, startError, startConversation])
 
-  // Auto-scroll chat to bottom when messages change.
+  // Scroll the "Earlier" sheet to the latest message when it opens.
   // IMPORTANT: avoid scrollIntoView() on iOS/WKWebView; it can scroll the page/webview and cause UI clipping.
   useEffect(() => {
-    const el = chatScrollRef.current
-    if (!el) return
-
-    // First time: no animation (prevents iOS rubber-banding).
-    const behavior: ScrollBehavior = hasAutoScrolledRef.current ? 'smooth' : 'auto'
-    hasAutoScrolledRef.current = true
-
-    // Wait a frame so layout/height is correct before scrolling.
+    if (!showHistory) return
     requestAnimationFrame(() => {
-      try {
-        el.scrollTo({ top: el.scrollHeight, behavior })
-      } catch {
-        // Fallback for older WebViews
-        el.scrollTop = el.scrollHeight
-      }
+      const el = chatScrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
     })
-  }, [conversationHistory])
+  }, [showHistory])
 
   const handleTapAiMessage = useCallback(async (text: string) => {
     const source = (text || '').trim()
@@ -537,6 +614,75 @@ export function ConversationScreen() {
     setAiTranslationOpen({ source, translation: finalText })
     setAiTranslationLoading(false)
   }, [aiTranslationOpen?.source, translateText, targetLanguage])
+
+  // Play some audio (replay, a suggestion, a correction) with the mic off, then
+  // go back to listening. The mic has to be off or it hears the playback as the
+  // user talking. Skipped if the user is mid-answer, because restarting the
+  // recorder would throw away what they've already said.
+  const playWithMicPaused = useCallback(async (play: () => Promise<void>) => {
+    const s = useStore.getState()
+    if (!isWaitingForUser || s.isProcessing || s.isAiSpeaking) return
+    if (hasSpokenThisTurnRef.current || isHandlingDoneRef.current || isClosingRef.current) return
+
+    setIsWaitingForUser(false)
+    stopRecording()
+    try {
+      await play()
+    } finally {
+      if (!isClosingRef.current) {
+        resetTurnState()
+        startRecording()
+        setIsWaitingForUser(true)
+      }
+    }
+  }, [isWaitingForUser, stopRecording, startRecording, resetTurnState])
+
+  const handleReplay = useCallback(() => {
+    if (!lastAiText) return
+    playWithMicPaused(() => textToSpeech(lastAiText))
+  }, [lastAiText, playWithMicPaused, textToSpeech])
+
+  const playCorrectionAudio = useCallback((url: string) => playWithMicPaused(() => new Promise<void>((resolve) => {
+    const audio = new Audio(url)
+    audio.onended = () => resolve()
+    audio.onerror = () => resolve()
+    audio.play().catch(() => resolve())
+  })), [playWithMicPaused])
+
+  const openSuggestions = useCallback(async (trigger: 'tap' | 'timer') => {
+    if (!lastAiText) return
+    setHelpDismissed(false)
+    setSuggestionsOpen(true)
+    logEvent('suggestions_shown', { trigger })
+
+    if (suggestions?.forText === lastAiText && suggestions.items) return // already fetched for this message
+    setSuggestions({ forText: lastAiText, items: null })
+    const items = await getSuggestions()
+    setSuggestions((prev) => (prev && prev.forText === lastAiText ? { forText: lastAiText, items } : prev))
+  }, [lastAiText, suggestions, logEvent, getSuggestions])
+
+  const closeSuggestions = useCallback(() => {
+    setSuggestionsOpen(false)
+    setHelpDismissed(true) // don't let the quiet-timer pop them straight back open
+  }, [])
+
+  const handleTapSuggestion = useCallback((index: number, text: string) => {
+    logEvent('suggestion_tapped', { index })
+    playWithMicPaused(() => textToSpeech(text))
+  }, [logEvent, playWithMicPaused, textToSpeech])
+
+  // Before the user has said anything this turn, offer reply suggestions on
+  // their own after a stretch of quiet. No countdown is shown - it's a quiet
+  // nudge, and "Need help?" is always there to open them sooner.
+  useEffect(() => {
+    if (!isWaitingForUser || isAiSpeaking || isProcessing || turnStarted) return
+    if (suggestionsOpen || helpDismissed || !lastAiText) return
+    // A correction or translation card already has the user's attention (and the
+    // room) - don't stack suggestions under it on their own; the link still works.
+    if (currentCorrection || currentTranslation) return
+    const id = window.setTimeout(() => openSuggestions('timer'), SUGGESTIONS_AUTO_OPEN_MS)
+    return () => window.clearTimeout(id)
+  }, [isWaitingForUser, isAiSpeaking, isProcessing, turnStarted, suggestionsOpen, helpDismissed, lastAiText, currentCorrection, currentTranslation, openSuggestions])
 
   // REMOVED: Auto-request feature to prevent infinite loops
   // Users must manually click "Enable Microphone" button to request permission
@@ -812,62 +958,91 @@ export function ConversationScreen() {
         )}
       </AnimatePresence>
 
-      {/* Main scrollable content area */}
+      {/* Main content area: only what's current - the AI's latest line and what you just said.
+          Earlier messages live behind the "Earlier" link. */}
       <div className="flex-1 flex flex-col w-full px-4 min-h-0">
-        {/* Chat History */}
-        <div ref={chatScrollRef} className="flex-1 w-full overflow-y-auto px-2 py-2 min-h-0">
-          <div className="space-y-3">
-            {conversationHistory.map((msg, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                  msg.role === 'user'
-                    ? 'bg-primary-500 text-white'
-                    : 'bg-surface-700 text-surface-200 border border-surface-600'
-                }`}>
-                  <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
-                  {msg.role === 'assistant' && (
-                    <button
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-surface-400 hover:text-surface-200 transition-colors"
-                      onClick={() => handleTapAiMessage(msg.content)}
-                      type="button"
-                    >
-                      <Languages className="w-3.5 h-3.5" />
-                      Translate
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            ))}
-            {/* Auto-scroll anchor */}
-            <div ref={chatEndRef} />
+        {conversationHistory.length > 1 && (
+          <div className="flex justify-center pb-1">
+            <button
+              onClick={() => setShowHistory(true)}
+              className="inline-flex items-center gap-1.5 text-xs text-surface-400 hover:text-surface-200 transition-colors py-1 px-2"
+              type="button"
+            >
+              <History className="w-3.5 h-3.5" />
+              Earlier · {conversationHistory.length - 1} messages
+            </button>
           </div>
+        )}
+
+        {/* The AI's latest line */}
+        <div className="flex-1 w-full overflow-y-auto px-2 py-2 min-h-0 flex flex-col">
+          {lastAiText && (
+            <motion.div
+              key={lastAiText}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="my-auto space-y-3"
+            >
+              <p className="text-2xl leading-snug font-medium text-white break-words whitespace-pre-wrap">
+                {lastAiText}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleReplay}
+                  className="inline-flex items-center gap-1.5 text-xs text-surface-300 bg-surface-700 hover:bg-surface-600 transition-colors rounded-full px-3 py-1.5"
+                  type="button"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  Replay
+                </button>
+                <button
+                  onClick={() => handleTapAiMessage(lastAiText)}
+                  className="inline-flex items-center gap-1.5 text-xs text-surface-300 bg-surface-700 hover:bg-surface-600 transition-colors rounded-full px-3 py-1.5"
+                  type="button"
+                >
+                  <Languages className="w-3.5 h-3.5" />
+                  Translate
+                </button>
+              </div>
+            </motion.div>
+          )}
         </div>
 
-        {/* Cards section (translations, corrections, etc.) */}
-        <div className="flex-shrink-0 w-full px-2 pb-2">
+        {/* Cards section (what you said, translations, corrections, suggestions) */}
+        <div className="flex-shrink-0 w-full px-2 pb-2 max-h-[50vh] overflow-y-auto">
           {/* User transcript */}
-          {userTranscript && (
+          {shownTranscript && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-center mb-3"
             >
               <span className="text-surface-500 text-xs uppercase tracking-wider">
-                {userTranscript === 'Transcribing...' ? '' : 'You said:'}
+                {shownTranscript === 'Transcribing...' ? '' : 'You said:'}
               </span>
               <p className={`text-base mt-1 ${
-                userTranscript === 'Transcribing...' ? 'text-yellow-400' : 'text-white'
+                shownTranscript === 'Transcribing...' ? 'text-yellow-400' : 'text-white'
               }`}>
-                {userTranscript === 'Transcribing...' ? userTranscript : `"${userTranscript}"`}
+                {shownTranscript === 'Transcribing...' ? shownTranscript : `"${shownTranscript}"`}
               </p>
             </motion.div>
           )}
-          
+
+          {praise && (
+            <motion.div
+              key={praise.id}
+              initial={{ opacity: 0, y: 6, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              className="text-center mb-3"
+            >
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-500/20 text-accent-400 text-sm font-medium px-3 py-1">
+                <Sparkles className="w-3.5 h-3.5" />
+                {praise.cheer}
+              </span>
+              <p className="text-xs text-surface-400 mt-1.5">{praise.line}</p>
+            </motion.div>
+          )}
+
           {currentTranslation && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -894,12 +1069,65 @@ export function ConversationScreen() {
               animate={{ opacity: 1, y: 0 }}
               className="mb-3"
             >
-              <CorrectionCard 
-                correction={currentCorrection} 
+              <CorrectionCard
+                correction={currentCorrection}
                 onDismiss={() => clearCorrection()}
-                onExpandChange={handleCorrectionExpandChange}
+                onPlay={playCorrectionAudio}
               />
             </motion.div>
+          )}
+
+          {/* Reply suggestions: only before the user has started answering. A quiet
+              "Need help?" link is always there; the panel opens on tap or after a long pause. */}
+          {isWaitingForUser && !isAiSpeaking && !isProcessing && !turnStarted && lastAiText && (
+            suggestionsOpen ? (
+              <div className="mb-2 space-y-2">
+                <div className="flex items-center justify-between gap-3 px-1">
+                  <span className="text-xs text-surface-400">Need a start? Tap one to hear it, then say it yourself.</span>
+                  <button
+                    onClick={closeSuggestions}
+                    className="text-xs text-surface-500 hover:text-surface-300 transition-colors flex-shrink-0"
+                    type="button"
+                  >
+                    Hide
+                  </button>
+                </div>
+                {suggestions?.forText === lastAiText && suggestions.items === null ? (
+                  <div className="flex items-center gap-2 text-xs text-surface-400 px-1 py-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Thinking of ideas...
+                  </div>
+                ) : suggestions?.forText === lastAiText && suggestions.items && suggestions.items.length > 0 ? (
+                  suggestions.items.map((s, i) => (
+                    <button
+                      key={`${i}-${s.text}`}
+                      onClick={() => handleTapSuggestion(i, s.text)}
+                      className="w-full text-left bg-surface-700 border border-surface-600 rounded-xl px-3 py-2.5 hover:bg-surface-600 transition-colors"
+                      type="button"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 text-sm font-medium text-white">{s.text}</span>
+                        <Volume2 className="w-4 h-4 text-surface-400 flex-shrink-0" />
+                      </div>
+                      {s.english && <span className="text-xs text-surface-400">{s.english}</span>}
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-xs text-surface-500 px-1 py-2">No ideas right now. Try saying something short.</p>
+                )}
+              </div>
+            ) : (
+              <div className="flex justify-center mb-2">
+                <button
+                  onClick={() => openSuggestions('tap')}
+                  className="inline-flex items-center gap-1.5 text-xs text-surface-400 hover:text-surface-200 transition-colors py-1 px-2"
+                  type="button"
+                >
+                  <Lightbulb className="w-3.5 h-3.5" />
+                  Need help?
+                </button>
+              </div>
+            )
           )}
 
           {/* Error */}
@@ -967,6 +1195,52 @@ export function ConversationScreen() {
         )}
       </AnimatePresence>
 
+      {/* Earlier messages */}
+      <AnimatePresence>
+        {showHistory && (
+          <motion.div
+            key="history-sheet"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-end justify-center p-4 bg-black/40"
+            onClick={() => setShowHistory(false)}
+          >
+            <motion.div
+              initial={{ y: 30, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 30, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md glass rounded-2xl p-4 border border-white/10 max-h-[75%] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <div className="text-sm text-surface-400">Earlier in this chat</div>
+                <button
+                  className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                  onClick={() => setShowHistory(false)}
+                >
+                  <X className="w-4 h-4 text-surface-400" />
+                </button>
+              </div>
+              <div ref={chatScrollRef} className="space-y-3 overflow-y-auto min-h-0">
+                {conversationHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
+                      msg.role === 'user'
+                        ? 'bg-primary-500 text-white'
+                        : 'bg-surface-700 text-surface-200 border border-surface-600'
+                    }`}>
+                      <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Bottom fixed area: Status + Done button + Timer */}
       <div className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8">
         {/* Status indicator + Done button row */}
@@ -1026,7 +1300,7 @@ export function ConversationScreen() {
                   ))}
                 </div>
                 <span className="text-primary-400 text-sm font-medium">
-                  {isSpeaking ? 'Listening...' : autoSubmitPending ? 'Got it, sending...' : 'Ready'}
+                  {isSpeaking ? 'Listening...' : inGrace ? 'Got it, sending...' : autoSubmitPending ? 'Listening...' : 'Ready'}
                 </span>
               </>
             ) : (
@@ -1046,7 +1320,7 @@ export function ConversationScreen() {
               <motion.button
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                onClick={handleDone}
+                onClick={() => handleDone('manual')}
                 className="flex items-center justify-center gap-2 w-full h-full btn-primary rounded-full font-semibold text-white shadow-lg"
               >
                 <Send className="w-4 h-4" />

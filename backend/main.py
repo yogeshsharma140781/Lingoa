@@ -59,6 +59,9 @@ ALLOWED_CLIENT_EVENT_TYPES = {
     "notification_permission_granted",
     "notification_permission_denied",
     "notification_tapped",
+    "turn_submitted",
+    "suggestions_shown",
+    "suggestion_tapped",
 }
 
 # In-memory: active conversation state only (lives for the duration of one
@@ -101,6 +104,30 @@ VOICE_MAP = {
 # Important: keep assistant self-references consistent with the chosen TTS voice persona.
 # We standardize on a female persona to match the default voice (ElevenLabs Rachel / OpenAI nova).
 AI_PERSONA_GENDER = "female"
+
+# OpenAI speech. gpt-4o-mini-tts sounds more natural than tts-1 and takes
+# instructions (it honors `speed` too). Override with OPENAI_TTS_MODEL if needed.
+OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+
+async def synthesize_with_openai(text: str, language: str, speed: float) -> bytes:
+    """Speak `text` with OpenAI in the (female) persona voice; falls back to tts-1 if the newer model errors."""
+    voice = VOICE_MAP.get(language, "nova")
+    kwargs = dict(voice=voice, input=text, speed=speed, response_format="mp3")
+    if OPENAI_TTS_MODEL.startswith("gpt-4o"):
+        language_name = LANGUAGE_NAMES.get(language, "the target language")
+        kwargs["instructions"] = (
+            f"A warm, friendly woman's voice. Speak {language_name} like a native speaker "
+            "having a relaxed conversation: natural accent and intonation, clear, not rushed."
+        )
+    try:
+        response = await client.audio.speech.create(model=OPENAI_TTS_MODEL, **kwargs)
+    except Exception as e:
+        if OPENAI_TTS_MODEL == "tts-1":
+            raise
+        print(f"[TTS] {OPENAI_TTS_MODEL} failed ({e}); retrying with tts-1")
+        kwargs.pop("instructions", None)
+        response = await client.audio.speech.create(model="tts-1", **kwargs)
+    return response.content
 
 # Topic descriptions for AI context (not announced to user)
 TOPIC_CONTEXT = {
@@ -304,6 +331,7 @@ CRITICAL RULES:
 - Short sentences (max 10-12 words)
 - Behave like a real person, not a teacher
 - Persona: you are a woman. Never refer to yourself as male.
+- In languages that mark gender, always use FEMININE forms about yourself (e.g. Spanish "estoy cansada", French "je suis contente", Italian "sono stanca", Portuguese "estou cansada", Hindi "मैं थक गई हूँ", German "Lehrerin"). Never the masculine form.
 - LANGUAGE REQUIREMENT - CRITICAL:
   - Speak ONLY in {target_language_name} ({language})
   - NEVER switch languages, even if user mixes languages
@@ -365,6 +393,7 @@ CRITICAL RULES:
 - Short sentences (max 10-12 words)
 - Behave like a real person
 - Persona: you are a woman. Never refer to yourself as male.
+- In languages that mark gender, always use FEMININE forms about yourself (e.g. Spanish "estoy cansada", French "je suis contente", Italian "sono stanca", Portuguese "estou cansada", Hindi "मैं थक गई हूँ", German "Lehrerin"). Never the masculine form.
 - LANGUAGE REQUIREMENT - CRITICAL:
   - Speak ONLY in {target_language_name} ({language})
   - NEVER switch languages, even if user mixes languages
@@ -432,6 +461,7 @@ SYSTEM_PROMPTS = {
 PERSONA (CONSISTENCY RULE):
 - You are a woman.
 - Never refer to yourself as male.
+- In languages that mark gender, always use FEMININE forms about yourself (e.g. Spanish "estoy cansada", French "je suis contente", Italian "sono stanca", Portuguese "estou cansada", Hindi "मैं थक गई हूँ", German "Lehrerin"). Never the masculine form.
 
 LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
 - The user is a language learner. Their pronunciation may be inaccurate.
@@ -630,6 +660,9 @@ class ClientEvent(BaseModel):
     target_language: Optional[str] = None
     metadata: Optional[dict] = None
 
+class SuggestionsRequest(BaseModel):
+    session_id: str
+
 # ============ Session Management ============
 
 @app.post("/api/session/start")
@@ -761,6 +794,70 @@ async def log_client_event(data: ClientEvent):
         metadata=data.metadata,
     )
     return {"ok": True}
+
+@app.post("/api/suggestions")
+async def get_reply_suggestions(data: SuggestionsRequest):
+    """
+    A few short things the learner could say in reply to the AI's last message,
+    each with an English hint. Called on demand (the user tapped "Need help?" or
+    stayed quiet for a while), so it never adds cost to turns that don't need it.
+    Always returns 200 with a (possibly empty) list - the UI just stays quiet if
+    there's nothing to show.
+    """
+    session = sessions.get(data.session_id)
+    if not session:
+        return {"suggestions": []}
+
+    messages = session.get("messages", [])
+    last_ai = next((m["content"] for m in reversed(messages) if m.get("role") == "assistant"), None)
+    if not last_ai:
+        return {"suggestions": []}
+
+    target_language = session.get("target_language", "en")
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    recent = "\n".join(
+        f"{'AI' if m.get('role') == 'assistant' else 'Learner'}: {m.get('content', '')}"
+        for m in messages[-4:]
+    )
+
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You help a beginner who is practising {target_name} by speaking.\n"
+                        "Given the conversation, suggest 3 different short replies the learner could say to the AI's last message.\n\n"
+                        "Rules:\n"
+                        f"- Each reply is in {target_name} only, natural and spoken, at most 8 words.\n"
+                        "- Make them different from each other (for example agree, disagree, add a detail).\n"
+                        "- Keep them simple enough for a beginner to say out loud.\n"
+                        "- Avoid words that reveal the speaker's gender (the learner's gender is unknown): prefer phrasing that works for anyone.\n"
+                        "- Each reply comes with a short English translation as the hint.\n"
+                        'Return JSON only: {"suggestions": [{"text": "...", "english": "..."}]}'
+                    ),
+                },
+                {"role": "user", "content": recent},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=220,
+            temperature=0.7,
+        )
+        parsed = json.loads(resp.choices[0].message.content or "{}")
+    except Exception as e:
+        print(f"[SUGGESTIONS] failed: {e}")
+        return {"suggestions": []}
+
+    suggestions = []
+    for item in parsed.get("suggestions", []):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        english = str(item.get("english", "")).strip()
+        if text:
+            suggestions.append({"text": text, "english": english})
+    return {"suggestions": suggestions[:3]}
 
 # ============ Sentence Matching and Improvement ============
 
@@ -2529,6 +2626,7 @@ async def ensure_target_language(text: str, target_language: str) -> str:
                         f"- If any part is not in {target_name}, rewrite the whole message into {target_name}.\n"
                         f"- Keep it short and spoken (max ~20 words).\n"
                         f"- Keep the same meaning and tone.\n"
+                        f"- The speaker is a woman: use feminine forms for anything she says about herself (where the language has them).\n"
                         f"- Ask at most ONE question.\n"
                         f"- Output ONLY the final message. No quotes. No explanations.\n"
                     ),
@@ -2557,6 +2655,7 @@ async def ensure_target_language(text: str, target_language: str) -> str:
                         f"- Speak ONLY in {target_name}\n"
                         f"- Keep it short and spoken (max ~20 words)\n"
                         f"- Keep the same meaning and tone\n"
+                        f"- The speaker is a woman: use feminine forms for anything she says about herself (where the language has them)\n"
                         f"- Ask at most ONE question\n"
                         f"- Do not add explanations or meta commentary\n"
                     ),
@@ -2580,7 +2679,11 @@ async def text_to_speech(data: TextToSpeechRequest):
     
     # Try ElevenLabs first if configured, then fallback to OpenAI
     elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
-    use_elevenlabs = elevenlabs_key and len(elevenlabs_key) > 10 and os.getenv("DISABLE_ELEVENLABS") != "true"
+    use_elevenlabs = (
+        elevenlabs_key and len(elevenlabs_key) > 10
+        and os.getenv("DISABLE_ELEVENLABS") != "true"
+        and os.getenv("TTS_PROVIDER", "elevenlabs").lower() != "openai"
+    )
     
     if use_elevenlabs:
         try:
@@ -2617,17 +2720,10 @@ async def text_to_speech(data: TextToSpeechRequest):
         if data.language == "hi":
             text_to_speak = add_pauses_for_hindi(data.text)
         
-        voice = VOICE_MAP.get(data.language, "nova")
-        response = await client.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=text_to_speak,
-            speed=data.speed,
-            response_format="mp3"
-        )
+        audio_content = await synthesize_with_openai(text_to_speak, data.language, data.speed)
         
-        audio_base64 = base64.b64encode(response.content).decode('utf-8')
-        print(f"[TTS] ✅ OpenAI generated {len(response.content)} bytes")
+        audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+        print(f"[TTS] ✅ OpenAI generated {len(audio_content)} bytes")
         return {"audio": audio_base64, "format": "mp3"}
     except Exception as fallback_error:
         print(f"[TTS FALLBACK ERROR] {fallback_error}")
@@ -2751,18 +2847,11 @@ Keep explanations simple and encouraging. Focus on helping them learn, not point
             return {"has_correction": False}
         
         # Generate audio for the corrected sentence
-        voice = VOICE_MAP.get(data.target_language, "nova")
         speed = 0.85 if data.target_language == "hi" else 0.75  # Slower for learning
         
-        audio_response = await client.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=result["corrected"],
-            speed=speed,
-            response_format="mp3"
-        )
+        audio_content = await synthesize_with_openai(result["corrected"], data.target_language, speed)
         
-        audio_base64 = base64.b64encode(audio_response.content).decode('utf-8')
+        audio_base64 = base64.b64encode(audio_content).decode('utf-8')
         
         return {
             "has_correction": True,
@@ -3106,7 +3195,7 @@ async def generate_roleplay_greeting(language: str, scenario_id: str = None, cus
         
         # Simple, natural greetings that work for any scenario
         if language == "hi":
-            return "नमस्ते! कैसे मदद कर सकता हूँ?"
+            return "नमस्ते! कैसे मदद कर सकती हूँ?"
         elif language == "es":
             return "¡Hola! ¿En qué puedo ayudarte?"
         elif language == "fr":
@@ -3145,13 +3234,13 @@ async def generate_roleplay_greeting(language: str, scenario_id: str = None, cus
             "job_interview": ["नमस्ते! बैठिए।", "हाय! कैसे हो?", "चलिए शुरू करते हैं।"],
             "hr_admin": ["नमस्ते। बताइए?", "हाय! कैसे मदद करूँ?", "क्या चाहिए?"],
             "taxi": ["हाँ जी, कहाँ जाना है?", "कहाँ जाना है?", "चलिए, कहाँ?"],
-            "customer_support": ["नमस्ते! कैसे मदद कर सकता हूँ?", "हाय! क्या problem है?", "बताइए, क्या हुआ?"],
+            "customer_support": ["नमस्ते! कैसे मदद कर सकती हूँ?", "हाय! क्या problem है?", "बताइए, क्या हुआ?"],
             "pharmacy": ["नमस्ते! क्या चाहिए?", "हाय! कैसे मदद करूँ?", "क्या prescription है?"],
-            "bank": ["नमस्ते! कैसे मदद कर सकता हूँ?", "हाय! क्या चाहिए?", "बताइए?"],
+            "bank": ["नमस्ते! कैसे मदद कर सकती हूँ?", "हाय! क्या चाहिए?", "बताइए?"],
             "post_office": ["नमस्ते! क्या चाहिए?", "हाय! कैसे मदद करूँ?", "क्या send करना है?"],
             "meeting_new": ["हाय! मैं [name] हूँ।", "नमस्ते! कैसे हो?", "हाय! कैसे मिले?"],
             "friends_home": ["अरे! आ जाओ!", "हाय! कैसे हो?", "अंदर आ जाओ!"],
-            "hotel_checkin": ["नमस्ते! check-in है?", "हाय! reservation है?", "कैसे मदद कर सकता हूँ?"],
+            "hotel_checkin": ["नमस्ते! check-in है?", "हाय! reservation है?", "कैसे मदद कर सकती हूँ?"],
             "travel_help": ["हाँ जी, बताइए?", "कैसे मदद करूँ?", "क्या problem है?"],
             "phone_call": ["हाय! कैसे हो?", "अरे! क्या हाल है?", "कैसे चल रहा है?"],
         },

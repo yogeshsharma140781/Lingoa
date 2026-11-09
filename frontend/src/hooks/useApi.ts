@@ -17,6 +17,11 @@ export const getApiBase = () => {
 
 export const API_BASE = getApiBase()
 
+export interface ReplySuggestion {
+  text: string     // What the learner could say, in the target language
+  english: string  // Short English hint
+}
+
 // Module-level audio tracking for interruptibility
 let currentAudio: HTMLAudioElement | null = null
 let audioUrls: string[] = [] // Track URLs for cleanup
@@ -190,7 +195,10 @@ export function useApi() {
       | 'mic_permission_denied'
       | 'notification_permission_granted'
       | 'notification_permission_denied'
-      | 'notification_tapped',
+      | 'notification_tapped'
+      | 'turn_submitted'
+      | 'suggestions_shown'
+      | 'suggestion_tapped',
     metadata?: Record<string, unknown>
   ) => {
     fetch(`${API_BASE}/events`, {
@@ -802,6 +810,25 @@ export function useApi() {
     setCurrentCorrection(null)
   }, [setCurrentCorrection])
 
+  // A few short replies the learner could say to the AI's last message (fetched
+  // on demand; an empty list just means the UI has nothing to show).
+  const getSuggestions = useCallback(async (): Promise<ReplySuggestion[]> => {
+    if (!sessionId) return []
+    try {
+      const res = await fetch(`${API_BASE}/suggestions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      return Array.isArray(data.suggestions) ? data.suggestions : []
+    } catch (err) {
+      console.error('Suggestions error:', err)
+      return []
+    }
+  }, [sessionId])
+
   return {
     fetchUserStats,
     logEvent,
@@ -816,5 +843,6 @@ export function useApi() {
     translateText,
     analyzeUserSpeech,
     clearCorrection,
+    getSuggestions,
   }
 }

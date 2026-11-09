@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { SessionWrapUp } from './encouragement'
 
 export type Screen = 'home' | 'mode' | 'topics' | 'roleplay' | 'custom-roleplay' | 'conversation' | 'completion' | 'improvements'
 
@@ -152,6 +153,11 @@ interface AppState {
   pendingNotificationPrompt: boolean
   setPendingNotificationPrompt: (pending: boolean) => void
 
+  // Kind word shown on the home screen right after leaving a conversation.
+  // Set just before navigating home; deliberately not cleared by resetSession.
+  sessionWrapUp: SessionWrapUp | null
+  setSessionWrapUp: (wrapUp: SessionWrapUp | null) => void
+
   // Reset
   resetSession: () => void
 }
@@ -273,6 +279,10 @@ export const useStore = create<AppState>((set) => ({
   // Notification permission prompt
   pendingNotificationPrompt: false,
   setPendingNotificationPrompt: (pending) => set({ pendingNotificationPrompt: pending }),
+
+  // Session wrap-up message
+  sessionWrapUp: null,
+  setSessionWrapUp: (wrapUp) => set({ sessionWrapUp: wrapUp }),
 
   // Reset
   resetSession: () => set({

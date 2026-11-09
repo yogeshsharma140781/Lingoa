@@ -323,7 +323,7 @@ class OpenAITTSProvider(TTSProvider):
             "fr": "nova",
             "de": "nova",
             "nl": "nova",
-            "en": "echo",
+            "en": "nova",   # keep the female persona (echo is a male voice)
             "default": "nova"
         }
     
