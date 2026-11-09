@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Flame, Play, ChevronDown, Check, Mic, Globe } from 'lucide-react'
+import { Flame, Play, ChevronDown, Check, Mic, Globe, X } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
-import { unlockAudio } from '../hooks/useApi'
+import { unlockAudio, useApi } from '../hooks/useApi'
 import { NotificationPrompt } from './NotificationPrompt'
-import { wrapUpMessage } from '../encouragement'
+import { wrapUpMessage, shouldAskFeeling, type SessionWrapUp } from '../encouragement'
 
 export function HomeScreen() {
   const {
@@ -21,13 +21,37 @@ export function HomeScreen() {
   } = useStore()
 
   const [showLanguages, setShowLanguages] = useState(false)
+  const { logEvent } = useApi()
 
-  // The kind word from the conversation they just left fades on its own.
+  // Sometimes the kind word also asks how the conversation felt.
+  const [askFeeling, setAskFeeling] = useState(false)
+  const [feelingAnswered, setFeelingAnswered] = useState(false)
+  const handledWrapUpRef = useRef<SessionWrapUp | null>(null)
+  useEffect(() => {
+    if (!sessionWrapUp || handledWrapUpRef.current === sessionWrapUp) return
+    handledWrapUpRef.current = sessionWrapUp
+    setAskFeeling(shouldAskFeeling())
+    setFeelingAnswered(false)
+  }, [sessionWrapUp])
+
+  const answerFeeling = (feeling: 'hard' | 'ok' | 'great') => {
+    if (!sessionWrapUp || feelingAnswered) return
+    logEvent('session_feeling', {
+      feeling,
+      hit_goal: sessionWrapUp.hitGoal,
+      speaking_ms: Math.round(sessionWrapUp.speakingMs),
+    })
+    setFeelingAnswered(true)
+  }
+
+  // The kind word from the conversation they just left fades on its own
+  // (a little later when it's asking a question, and right after it's answered).
   useEffect(() => {
     if (!sessionWrapUp) return
-    const id = window.setTimeout(() => setSessionWrapUp(null), 7000)
+    const ms = feelingAnswered ? 1500 : askFeeling ? 12000 : 7000
+    const id = window.setTimeout(() => setSessionWrapUp(null), ms)
     return () => window.clearTimeout(id)
-  }, [sessionWrapUp, setSessionWrapUp])
+  }, [sessionWrapUp, askFeeling, feelingAnswered, setSessionWrapUp])
 
   const currentLanguage = LANGUAGES.find(l => l.code === targetLanguage) || LANGUAGES[0]
   const targetMinutes = Math.round(targetTime / 60000)
@@ -154,18 +178,46 @@ export function HomeScreen() {
       {/* Kind word after a conversation (skipped when the reminder prompt is up, which has its own moment) */}
       <AnimatePresence>
         {sessionWrapUp && !pendingNotificationPrompt && (
-          <motion.button
+          <motion.div
             key="wrap-up"
             initial={{ opacity: 0, y: -12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
-            onClick={() => setSessionWrapUp(null)}
             className="absolute top-28 inset-x-6 z-20 glass rounded-2xl px-4 py-3 text-left border border-accent-500/30"
-            type="button"
           >
-            <p className="text-accent-400 text-sm font-semibold">{wrapUpText?.title}</p>
-            <p className="text-surface-200 text-sm mt-0.5">{wrapUpText?.body}</p>
-          </motion.button>
+            <button
+              onClick={() => setSessionWrapUp(null)}
+              className="absolute top-2 right-2 p-1.5 rounded-full text-surface-500 hover:text-surface-300 transition-colors"
+              aria-label="Dismiss"
+              type="button"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <p className="text-accent-400 text-sm font-semibold pr-6">{wrapUpText?.title}</p>
+            <p className="text-surface-200 text-sm mt-0.5 pr-6">{wrapUpText?.body}</p>
+            {askFeeling && (
+              feelingAnswered ? (
+                <p className="text-surface-400 text-xs mt-3">Thanks, that helps.</p>
+              ) : (
+                <div className="mt-3">
+                  <p className="text-surface-400 text-xs mb-2">How did that feel?</p>
+                  <div className="flex gap-2">
+                    {([['hard', '😟', 'Hard'], ['ok', '🙂', 'Okay'], ['great', '😀', 'Great']] as const).map(([value, face, label]) => (
+                      <button
+                        key={value}
+                        onClick={() => answerFeeling(value)}
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors py-2 text-sm text-surface-200"
+                        type="button"
+                      >
+                        <span aria-hidden="true">{face}</span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
+          </motion.div>
         )}
       </AnimatePresence>
 

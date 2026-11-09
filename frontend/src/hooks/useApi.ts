@@ -1,6 +1,7 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { useStore, Improvement, Correction } from '../store'
+import { loadAppInfo } from '../appInfo'
 
 // API base URL - use full URL for iOS, relative for web
 export const getApiBase = () => {
@@ -175,7 +176,8 @@ export function useApi() {
   // Fetch user stats
   const fetchUserStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/user/${userId}/stats`)
+      const { version, platform } = await loadAppInfo()
+      const res = await fetch(`${API_BASE}/user/${userId}/stats?v=${encodeURIComponent(version)}&p=${encodeURIComponent(platform)}`)
       if (res.ok) {
         const data = await res.json()
         setUserStats(data.streak, data.completed_today)
@@ -184,6 +186,11 @@ export function useApi() {
       console.error('Failed to fetch user stats:', err)
     }
   }, [userId, setUserStats])
+
+  // Read inside logEvent through a ref so logging doesn't change identity when the session starts/ends
+  // (effects that depend on logEvent would otherwise re-run and could double-log).
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
 
   // Fire-and-forget usage event logging (funnel steps that don't already have
   // their own backend round-trip). Must never throw or block the UI - a failed
@@ -198,19 +205,37 @@ export function useApi() {
       | 'notification_tapped'
       | 'turn_submitted'
       | 'suggestions_shown'
-      | 'suggestion_tapped',
+      | 'suggestion_tapped'
+      | 'conversation_closed'
+      | 'correction_shown'
+      | 'correction_heard'
+      | 'correction_dismissed'
+      | 'response_timing'
+      | 'struggle_signal'
+      | 'session_feeling'
+      | 'ai_replayed'
+      | 'translate_tapped'
+      | 'history_opened'
+      | 'goal_reached'
+      | 'transcribe_failed',
     metadata?: Record<string, unknown>
   ) => {
-    fetch(`${API_BASE}/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        event_type: eventType,
-        target_language: targetLanguage,
-        metadata,
-      }),
-    }).catch((err) => console.error('Failed to log event:', eventType, err))
+    // Capture the session now: the screen may reset it before the request is built.
+    const eventSessionId = sessionIdRef.current
+    // Every event carries the build it came from, so results can be split by version.
+    loadAppInfo()
+      .then(({ version, platform }) => fetch(`${API_BASE}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          event_type: eventType,
+          target_language: targetLanguage,
+          session_id: eventSessionId,
+          metadata: { ...metadata, app_version: version, platform },
+        }),
+      }))
+      .catch((err) => console.error('Failed to log event:', eventType, err))
   }, [userId, targetLanguage])
 
   // Start a new session
@@ -231,11 +256,14 @@ export function useApi() {
       const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
       
       try {
+        const { version, platform } = await loadAppInfo()
         // Build request body - only include non-null values
         const requestBody: any = {
           user_id: userId,
           target_language: targetLanguage,
           topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
+          app_version: version,
+          platform,
         }
         
         // Only add roleplay fields if they have values
@@ -288,12 +316,15 @@ export function useApi() {
     setIsAiSpeaking(false)
 
     try {
+      const { version, platform } = await loadAppInfo()
       const res = await fetch(`${API_BASE}/session/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
           total_speaking_time: totalSpeakingTime / 1000,
+          app_version: version,
+          platform,
         }),
       })
 
@@ -491,7 +522,8 @@ export function useApi() {
   }, [sessionId, appendAiMessage, setCurrentTranslation, setAiMessage, currentTranslation])
 
   // Text to speech - uses regular TTS endpoint (handles ElevenLabs/OpenAI fallback server-side)
-  const textToSpeech = useCallback(async (text: string): Promise<void> => {
+  // onPlaybackStart fires once, the moment audio is actually audible (used to time how long users wait).
+  const textToSpeech = useCallback(async (text: string, onPlaybackStart?: () => void): Promise<void> => {
     // Stop any currently playing audio
     stopAllAudio()
 
@@ -503,7 +535,7 @@ export function useApi() {
       // Use regular TTS endpoint - it handles ElevenLabs with OpenAI fallback automatically
       // This is more reliable than trying streaming first
       const actualSpeed = getActualSpeed(audioSpeed, targetLanguage)
-      await playRegularTTS(text, targetLanguage, actualSpeed, setIsAiSpeaking)
+      await playRegularTTS(text, targetLanguage, actualSpeed, setIsAiSpeaking, onPlaybackStart)
     } catch (err) {
       console.error('[TTS] Error:', err)
       setIsAiSpeaking(false)
@@ -515,9 +547,16 @@ export function useApi() {
     text: string,
     language: string,
     speed: number,
-    setIsAiSpeaking: (speaking: boolean) => void
+    setIsAiSpeaking: (speaking: boolean) => void,
+    onPlaybackStart?: () => void
   ) => {
     console.log(`[TTS] Sending to TTS API: "${text}"`)
+    let playbackStartFired = false
+    const firePlaybackStart = () => {
+      if (playbackStartFired) return
+      playbackStartFired = true
+      onPlaybackStart?.()
+    }
     
     try {
       const res = await fetch(`${API_BASE}/tts`, {
@@ -581,6 +620,7 @@ export function useApi() {
               playbackStarted = true
               audio.play().then(() => {
                 console.log('[TTS] Audio playing via HTMLAudioElement')
+                firePlaybackStart()
                 setAudioSilentMode(false)
               }).catch((err) => {
                 console.error('[TTS] Play failed:', err)
@@ -598,6 +638,7 @@ export function useApi() {
               playbackStarted = true
               audio.play().then(() => {
                 console.log('[TTS] Audio playing via HTMLAudioElement (delayed)')
+                firePlaybackStart()
                 setAudioSilentMode(false)
               }).catch((err) => {
                 console.error('[TTS] Play failed (delayed):', err)
@@ -643,6 +684,7 @@ export function useApi() {
             
             try {
               source.start(0)
+              firePlaybackStart()
               console.log(`[TTS] Playing via Web Audio API at ${playbackRate}x speed`)
             } catch (startError) {
               console.error('[TTS] Failed to start audio:', startError)
@@ -677,6 +719,7 @@ export function useApi() {
             }
 
             audio.play().then(() => {
+              firePlaybackStart()
               setAudioSilentMode(false)
             }).catch((err) => {
               console.error('[TTS] Play failed:', err)

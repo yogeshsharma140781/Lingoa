@@ -6,7 +6,7 @@ import { useStore } from '../store'
 import { useApi, unlockAudio, type ReplySuggestion } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { isPraiseworthy, pickPraise, goalPraise, type Praise } from '../encouragement'
-import { VAD_PAUSE_MS, GRACE_MS, SUGGESTIONS_AUTO_OPEN_MS, silenceWaitMs } from '../hooks/turnTiming'
+import { VAD_PAUSE_MS, GRACE_MS, SUGGESTIONS_AUTO_OPEN_MS, LONG_SILENCE_MS, silenceWaitMs } from '../hooks/turnTiming'
 import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { CorrectionCard } from './CorrectionCard'
 import { TranslationCard } from './TranslationCard'
@@ -92,6 +92,18 @@ export function ConversationScreen() {
   const graceActiveRef = useRef(false) // In the "sending..." grace window right now
   const graceCancelsRef = useRef(0) // How many times speaking again cancelled a send this turn
   const goalCelebratedRef = useRef(false) // Already cheered the daily goal in this session
+  // Usage-event bookkeeping (what happened, for how long, and where they got stuck)
+  const sessionStartedAtRef = useRef(0)
+  const turnIndexRef = useRef(0) // How many turns they've submitted so far
+  const turnOpenedAtRef = useRef(0) // When the mic opened for the current turn
+  const firstSpeechAtRef = useRef<number | null>(null)
+  const lastSpeechEndAtRef = useRef<number | null>(null)
+  const longestPauseMsRef = useRef(0)
+  const emptyTurnsInARowRef = useRef(0)
+  const replayRef = useRef<{ text: string; count: number }>({ text: '', count: 0 })
+  const lastStruggleRef = useRef<{ reason: string; at: number } | null>(null)
+  const longSilenceTurnRef = useRef(-1)
+  const goalLoggedRef = useRef(false)
 
   const lastAiText = [...conversationHistory].reverse().find((m) => m.role === 'assistant')?.content ?? ''
   const lastUserText = [...conversationHistory].reverse().find((m) => m.role === 'user')?.content ?? ''
@@ -99,15 +111,30 @@ export function ConversationScreen() {
   // otherwise their last finished turn (so it doesn't vanish when the AI answers).
   const shownTranscript = userTranscript || lastUserText
 
-  // Start of a fresh "waiting for the user" turn.
-  const resetTurnState = useCallback(() => {
+  // Start of a fresh "waiting for the user" turn. newTurn=false is for re-opening the
+  // mic after playing audio (replay, a suggestion): same turn, so its clock keeps running.
+  const resetTurnState = useCallback((newTurn = true) => {
     hasSpokenThisTurnRef.current = false
     turnSpeechMsRef.current = 0
     graceCancelsRef.current = 0
     graceActiveRef.current = false
     setTurnStarted(false)
     setInGrace(false)
+    if (newTurn) {
+      turnOpenedAtRef.current = Date.now()
+      firstSpeechAtRef.current = null
+      lastSpeechEndAtRef.current = null
+      longestPauseMsRef.current = 0
+    }
   }, [])
+
+  // A moment the learner may have struggled (couldn't start, wasn't heard, hit a
+  // wall). Behaviour only: it says friction happened, not how anyone felt.
+  // turns_before = turns submitted before this moment (0 = before the first answer).
+  const signalStruggle = useCallback((reason: string, extra?: Record<string, unknown>) => {
+    lastStruggleRef.current = { reason, at: Date.now() }
+    logEvent('struggle_signal', { reason, turns_before: turnIndexRef.current, ...extra })
+  }, [logEvent])
   
   const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios'
 
@@ -198,6 +225,7 @@ export function ConversationScreen() {
       
       const session = await startSession()
       if (session) {
+        sessionStartedAtRef.current = Date.now()
         setIsInitialized(true)
         setIsProcessing(false)
         
@@ -326,16 +354,32 @@ export function ConversationScreen() {
     // much they actually said (so we can see if short submissions are cut-offs).
     const turnSpeechMs = Math.round(turnSpeechMsRef.current)
     const graceCancels = graceCancelsRef.current
+    const longestPauseMs = Math.round(longestPauseMsRef.current)
+    const timeToFirstSpeechMs = firstSpeechAtRef.current !== null
+      ? firstSpeechAtRef.current - turnOpenedAtRef.current
+      : null
+    const turnIndex = turnIndexRef.current + 1 // 1-based
+    const startedAt = performance.now() // for response_timing
     const logTurn = (text: string) => {
       const trimmed = text.trim()
       logEvent('turn_submitted', {
         trigger,
+        turn_index: turnIndex,
         speech_ms: turnSpeechMs,
         silence_wait_ms: silenceWaitMs,
         grace_cancels: graceCancels,
+        longest_pause_ms: longestPauseMs,
+        time_to_first_speech_ms: timeToFirstSpeechMs,
         word_count: trimmed ? trimmed.split(/\s+/).length : 0,
         char_count: trimmed.length,
       })
+    }
+    // Nothing usable came back (silence, noise, or a failed upload). Two in a row is a struggle.
+    const noteEmptyTurn = () => {
+      emptyTurnsInARowRef.current += 1
+      if (emptyTurnsInARowRef.current >= 2) {
+        signalStruggle('no_speech_repeat', { count: emptyTurnsInARowRef.current })
+      }
     }
 
     setIsWaitingForUser(false)
@@ -354,10 +398,15 @@ export function ConversationScreen() {
         // Always use target language as hint to help Whisper interpret imperfect pronunciation
         // During translation repeat step, we still pass targetLanguage to bias toward correct language
         const transcription = await transcribeAudio(blob, targetLanguage)
+        const transcribeMs = Math.round(performance.now() - startedAt)
         
         if (transcription?.text && transcription.text.trim()) {
           const transcript = transcription.text
           logTurn(transcript)
+          emptyTurnsInARowRef.current = 0
+          if (graceCancels >= 2 || longestPauseMs >= 2500) {
+            signalStruggle('hesitation', { grace_cancels: graceCancels, longest_pause_ms: longestPauseMs })
+          }
           setUserTranscript(transcript)
           clearCorrection() // Clear any previous correction
           
@@ -365,6 +414,7 @@ export function ConversationScreen() {
           // If they're speaking English while learning Dutch (etc), we want translation-assist to take over,
           // and we should not show a "correction" card that looks like a translation.
           const looksEnglish = /\b(i|you|we|they|my|your|dont|don't|didn't|cant|can't|won't|wont|not)\b/i.test(transcript)
+          if (targetLanguage !== 'en' && looksEnglish) signalStruggle('switched_to_english')
           if (!(targetLanguage !== 'en' && looksEnglish)) {
             analyzeUserSpeech(transcript)
 
@@ -400,7 +450,9 @@ export function ConversationScreen() {
           
           // Clear translation card AFTER processing response
           // Only clear if user didn't explicitly ask for translation (check if transcript looks like translation request)
+          const aiTextMs = Math.round(performance.now() - startedAt)
           const isTranslationRequest = /\b(how\s+do\s+(?:you|i)\s+say|what'?s?\s+.+\s+in|translate)\b/i.test(transcript)
+          if (isTranslationRequest) signalStruggle('asked_translation')
           if (!isTranslationRequest) {
             // Small delay to ensure SSE events are processed first, then clear
             setTimeout(() => {
@@ -412,11 +464,16 @@ export function ConversationScreen() {
             // Add AI response to history
             addMessage('assistant', response.trim())
             setUserTranscript('')
-            await textToSpeech(response)
+            // How long the user waited, from the moment we sent their turn off until the AI's voice began.
+            let audioStartMs: number | null = null
+            await textToSpeech(response, () => { audioStartMs = Math.round(performance.now() - startedAt) })
+            logEvent('response_timing', { transcribe_ms: transcribeMs, ai_text_ms: aiTextMs, audio_start_ms: audioStartMs })
           }
         } else {
           console.warn('[handleDone] No speech detected in transcription result:', transcription)
+          if (transcription === null) logEvent('transcribe_failed')
           logTurn('')
+          noteEmptyTurn()
           setUserTranscript('(No speech detected)')
           await new Promise(r => setTimeout(r, 1000))
           setUserTranscript('')
@@ -428,6 +485,7 @@ export function ConversationScreen() {
     } else {
       console.warn('[handleDone] No audio blob or empty blob:', blob?.size, 'bytes')
       logTurn('')
+      noteEmptyTurn()
       setUserTranscript('(No audio recorded)')
       await new Promise(r => setTimeout(r, 1000))
       setUserTranscript('')
@@ -436,6 +494,7 @@ export function ConversationScreen() {
       setIsProcessing(false)
 
       // Restart recording for next turn
+      turnIndexRef.current = turnIndex
       resetTurnState()
       startRecording()
       setIsWaitingForUser(true)
@@ -454,6 +513,28 @@ export function ConversationScreen() {
     
     try {
       stopRecording()
+
+      // Where were they when they left? Leaving right after a struggle is the
+      // closest thing we can observe to "this isn't going to work for me".
+      const lastState = isProcessing ? 'processing'
+        : isAiSpeaking ? 'ai_speaking'
+        : turnStarted ? 'mid_answer'
+        : currentCorrection ? 'after_correction'
+        : emptyTurnsInARowRef.current > 0 ? 'after_no_speech'
+        : suggestionsOpen ? 'suggestions_open'
+        : turnIndexRef.current === 0 ? 'before_first_speech'
+        : 'waiting_to_speak'
+      const struggle = lastStruggleRef.current
+      logEvent('conversation_closed', {
+        duration_ms: sessionStartedAtRef.current ? Date.now() - sessionStartedAtRef.current : null,
+        turns: turnIndexRef.current,
+        speaking_ms: Math.round(speakingTime),
+        spoke: speakingTime > 0,
+        last_state: lastState,
+        last_struggle: struggle?.reason ?? null,
+        ms_since_struggle: struggle ? Date.now() - struggle.at : null,
+      })
+
       if (speakingTime > 0) {
         // Leave them with a kind word on the home screen.
         setSessionWrapUp({ speakingMs: speakingTime, hitGoal: speakingTime >= targetTime, languageCode: targetLanguage })
@@ -521,6 +602,12 @@ export function ConversationScreen() {
         graceCancelsRef.current += 1
         graceActiveRef.current = false
       }
+      const now = Date.now()
+      if (firstSpeechAtRef.current === null) firstSpeechAtRef.current = now
+      if (lastSpeechEndAtRef.current !== null) {
+        longestPauseMsRef.current = Math.max(longestPauseMsRef.current, now - lastSpeechEndAtRef.current)
+        lastSpeechEndAtRef.current = null
+      }
       hasSpokenThisTurnRef.current = true
       setTurnStarted(true)
       setInGrace(false)
@@ -535,6 +622,7 @@ export function ConversationScreen() {
 
     // Silence after speech. isSpeaking already went false after VAD_PAUSE_MS of
     // silence, so only the remainder is left to wait.
+    if (lastSpeechEndAtRef.current === null) lastSpeechEndAtRef.current = Date.now()
     setAutoSubmitPending(true)
     const totalWaitMs = silenceWaitMs(turnSpeechMsRef.current)
     let graceTimerId: number | undefined
@@ -563,6 +651,33 @@ export function ConversationScreen() {
     setSuggestionsOpen(false)
     setHelpDismissed(false)
   }, [lastAiText])
+
+  // Usage events for moments worth knowing about. (Deliberately separate from the
+  // suggestions timer so opening suggestions doesn't restart this clock.)
+  useEffect(() => {
+    if (!isWaitingForUser || isAiSpeaking || isProcessing || turnStarted) return
+    const id = window.setTimeout(() => {
+      if (longSilenceTurnRef.current === turnIndexRef.current) return // once per turn
+      longSilenceTurnRef.current = turnIndexRef.current
+      signalStruggle('long_silence')
+    }, LONG_SILENCE_MS)
+    return () => window.clearTimeout(id)
+  }, [isWaitingForUser, isAiSpeaking, isProcessing, turnStarted, signalStruggle])
+
+  useEffect(() => {
+    if (currentCorrection) logEvent('correction_shown')
+  }, [currentCorrection, logEvent])
+
+  useEffect(() => {
+    // The app had to guess what they meant (garbled transcript)
+    if (currentYouMeant) signalStruggle('garbled')
+  }, [currentYouMeant, signalStruggle])
+
+  useEffect(() => {
+    if (!isInitialized || goalLoggedRef.current || targetTime <= 0 || speakingTime < targetTime) return
+    goalLoggedRef.current = true
+    logEvent('goal_reached', { session_ms: Date.now() - sessionStartedAtRef.current })
+  }, [speakingTime, targetTime, isInitialized, logEvent])
 
   // Start conversation when permission is granted
   useEffect(() => {
@@ -598,6 +713,10 @@ export function ConversationScreen() {
       return
     }
 
+    // Needing the AI's line translated = they couldn't follow it
+    logEvent('translate_tapped')
+    signalStruggle('translated_ai_line')
+
     const cached = aiTranslationCacheRef.current.get(source)
     if (cached) {
       setAiTranslationOpen({ source, translation: cached })
@@ -613,7 +732,7 @@ export function ConversationScreen() {
     aiTranslationCacheRef.current.set(source, finalText)
     setAiTranslationOpen({ source, translation: finalText })
     setAiTranslationLoading(false)
-  }, [aiTranslationOpen?.source, translateText, targetLanguage])
+  }, [aiTranslationOpen?.source, translateText, targetLanguage, logEvent, signalStruggle])
 
   // Play some audio (replay, a suggestion, a correction) with the mic off, then
   // go back to listening. The mic has to be off or it hears the playback as the
@@ -630,7 +749,7 @@ export function ConversationScreen() {
       await play()
     } finally {
       if (!isClosingRef.current) {
-        resetTurnState()
+        resetTurnState(false)
         startRecording()
         setIsWaitingForUser(true)
       }
@@ -639,27 +758,38 @@ export function ConversationScreen() {
 
   const handleReplay = useCallback(() => {
     if (!lastAiText) return
-    playWithMicPaused(() => textToSpeech(lastAiText))
-  }, [lastAiText, playWithMicPaused, textToSpeech])
+    playWithMicPaused(() => {
+      logEvent('ai_replayed')
+      // Replaying the same line again and again = they're not catching it
+      replayRef.current = replayRef.current.text === lastAiText
+        ? { text: lastAiText, count: replayRef.current.count + 1 }
+        : { text: lastAiText, count: 1 }
+      if (replayRef.current.count >= 2) signalStruggle('replay_repeat', { count: replayRef.current.count })
+      return textToSpeech(lastAiText)
+    })
+  }, [lastAiText, playWithMicPaused, textToSpeech, logEvent, signalStruggle])
 
   const playCorrectionAudio = useCallback((url: string) => playWithMicPaused(() => new Promise<void>((resolve) => {
+    logEvent('correction_heard')
     const audio = new Audio(url)
     audio.onended = () => resolve()
     audio.onerror = () => resolve()
     audio.play().catch(() => resolve())
-  })), [playWithMicPaused])
+  })), [playWithMicPaused, logEvent])
 
   const openSuggestions = useCallback(async (trigger: 'tap' | 'timer') => {
     if (!lastAiText) return
     setHelpDismissed(false)
     setSuggestionsOpen(true)
     logEvent('suggestions_shown', { trigger })
+    // Asking for help is a direct "I need a hand" (the timer opening is covered by long_silence)
+    if (trigger === 'tap') signalStruggle('asked_for_help')
 
     if (suggestions?.forText === lastAiText && suggestions.items) return // already fetched for this message
     setSuggestions({ forText: lastAiText, items: null })
     const items = await getSuggestions()
     setSuggestions((prev) => (prev && prev.forText === lastAiText ? { forText: lastAiText, items } : prev))
-  }, [lastAiText, suggestions, logEvent, getSuggestions])
+  }, [lastAiText, suggestions, logEvent, getSuggestions, signalStruggle])
 
   const closeSuggestions = useCallback(() => {
     setSuggestionsOpen(false)
@@ -912,6 +1042,8 @@ export function ConversationScreen() {
                   <button
                     key={speed}
                     onClick={() => {
+                      // Slowing the AI down = it's too fast to follow
+                      if (speed < audioSpeed) signalStruggle('slowed_speed', { from: audioSpeed, to: speed })
                       setAudioSpeed(speed)
                       setShowSpeedMenu(false)
                     }}
@@ -964,7 +1096,10 @@ export function ConversationScreen() {
         {conversationHistory.length > 1 && (
           <div className="flex justify-center pb-1">
             <button
-              onClick={() => setShowHistory(true)}
+              onClick={() => {
+                logEvent('history_opened')
+                setShowHistory(true)
+              }}
               className="inline-flex items-center gap-1.5 text-xs text-surface-400 hover:text-surface-200 transition-colors py-1 px-2"
               type="button"
             >
@@ -1071,7 +1206,10 @@ export function ConversationScreen() {
             >
               <CorrectionCard
                 correction={currentCorrection}
-                onDismiss={() => clearCorrection()}
+                onDismiss={() => {
+                  logEvent('correction_dismissed')
+                  clearCorrection()
+                }}
                 onPlay={playCorrectionAudio}
               />
             </motion.div>

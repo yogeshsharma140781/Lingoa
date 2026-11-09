@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { Capacitor } from '@capacitor/core'
 import App from './App'
+import { loadAppInfo } from './appInfo'
 import './index.css'
 
 // Tag <html> so index.css can tell the native iOS app (real WKWebView notch/home-
@@ -12,6 +13,9 @@ import './index.css'
 if (Capacitor.isNativePlatform()) {
   document.documentElement.classList.add('native-ios')
 }
+
+// Warm up the app version so the first usage events already carry it.
+loadAppInfo()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

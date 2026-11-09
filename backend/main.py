@@ -62,6 +62,18 @@ ALLOWED_CLIENT_EVENT_TYPES = {
     "turn_submitted",
     "suggestions_shown",
     "suggestion_tapped",
+    "conversation_closed",
+    "correction_shown",
+    "correction_heard",
+    "correction_dismissed",
+    "response_timing",
+    "struggle_signal",
+    "session_feeling",
+    "ai_replayed",
+    "translate_tapped",
+    "history_opened",
+    "goal_reached",
+    "transcribe_failed",
 }
 
 # In-memory: active conversation state only (lives for the duration of one
@@ -616,6 +628,8 @@ class SessionStart(BaseModel):
     topic: str = "random"        # Conversation topic (or "roleplay" for role-play mode)
     roleplay_id: Optional[str] = None      # Role-play scenario ID (if topic is "roleplay")
     custom_scenario: Optional[str] = None   # Custom role-play scenario description
+    app_version: Optional[str] = None       # Which build the user is on (for before/after comparisons)
+    platform: Optional[str] = None          # ios / android / web
     
     model_config = {
         "extra": "forbid"  # Don't allow extra fields
@@ -624,6 +638,8 @@ class SessionStart(BaseModel):
 class SessionEnd(BaseModel):
     session_id: str
     total_speaking_time: float  # in seconds
+    app_version: Optional[str] = None
+    platform: Optional[str] = None
 
 class UserMessage(BaseModel):
     session_id: str
@@ -658,6 +674,7 @@ class ClientEvent(BaseModel):
     user_id: str
     event_type: str
     target_language: Optional[str] = None
+    session_id: Optional[str] = None  # which conversation it belongs to (lets events be joined per session)
     metadata: Optional[dict] = None
 
 class SuggestionsRequest(BaseModel):
@@ -713,7 +730,13 @@ async def start_session(data: SessionStart):
             "session_started",
             target_language=data.target_language,
             session_id=session_id,
-            metadata={"topic": data.topic, "roleplay_id": roleplay_id, "has_custom_scenario": bool(custom_scenario)},
+            metadata={
+                "topic": data.topic,
+                "roleplay_id": roleplay_id,
+                "has_custom_scenario": bool(custom_scenario),
+                "app_version": data.app_version,
+                "platform": data.platform,
+            },
         )
 
         return {
@@ -751,7 +774,12 @@ async def end_session(data: SessionEnd):
         "session_completed",
         target_language=session.get("target_language"),
         session_id=data.session_id,
-        metadata={"total_speaking_time": data.total_speaking_time, "hit_daily_goal": is_full_completion},
+        metadata={
+            "total_speaking_time": data.total_speaking_time,
+            "hit_daily_goal": is_full_completion,
+            "app_version": data.app_version,
+            "platform": data.platform,
+        },
     )
 
     # Generate feedback
@@ -766,10 +794,10 @@ async def end_session(data: SessionEnd):
     }
 
 @app.get("/api/user/{user_id}/stats")
-async def get_user_stats(user_id: str):
-    """Get user statistics"""
+async def get_user_stats(user_id: str, v: Optional[str] = None, p: Optional[str] = None):
+    """Get user statistics (v = app version, p = platform; optional, recorded on the app_opened event)"""
     stats = await db.get_user_stats(user_id)
-    await db.log_event(user_id, "app_opened")
+    await db.log_event(user_id, "app_opened", metadata={"app_version": v, "platform": p} if (v or p) else None)
 
     return {
         "streak": stats["streak"],
@@ -791,6 +819,7 @@ async def log_client_event(data: ClientEvent):
         data.user_id,
         data.event_type,
         target_language=data.target_language,
+        session_id=data.session_id,
         metadata=data.metadata,
     )
     return {"ok": True}

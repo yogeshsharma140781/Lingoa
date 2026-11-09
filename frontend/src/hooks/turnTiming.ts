@@ -27,3 +27,7 @@ export const SUGGESTIONS_AUTO_OPEN_MS = 7000
 export function silenceWaitMs(turnSpeechMs: number): number {
   return turnSpeechMs < SHORT_PHRASE_SPEECH_MS ? SILENCE_WAIT_SHORT_PHRASE_MS : SILENCE_WAIT_MS
 }
+
+// No speech at all this long after the AI finished talking is logged as a
+// "struggle" moment (they may not know what to say, or doubt it will work).
+export const LONG_SILENCE_MS = 15000

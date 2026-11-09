@@ -85,3 +85,17 @@ export function wrapUpMessage(wrapUp: SessionWrapUp, languageName: string): { ti
   }
   return { title: 'Good start', body: 'Come back tomorrow and go a little longer. You\'ve got this.' }
 }
+
+// "How did that feel?" - the one place we ask directly. Only now and then, so it
+// stays a pleasant question and not a chore: after the first conversation, then
+// every fourth one.
+const WRAP_UPS_KEY = 'lingoa_wrap_ups_shown'
+export function shouldAskFeeling(): boolean {
+  try {
+    const shown = Number(localStorage.getItem(WRAP_UPS_KEY) || '0') + 1
+    localStorage.setItem(WRAP_UPS_KEY, String(shown))
+    return shown % 4 === 1
+  } catch {
+    return false
+  }
+}
