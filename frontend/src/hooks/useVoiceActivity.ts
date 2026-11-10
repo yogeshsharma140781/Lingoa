@@ -294,6 +294,26 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     })
   }, [cleanupMedia])
 
+  // Everything recorded so far, WITHOUT stopping or clearing: the recording carries on. Used to
+  // start transcribing while the user might still be about to say more (they can cancel it).
+  const getSnapshotBlob = useCallback(async (): Promise<Blob | null> => {
+    const recorder = mediaRecorderRef.current
+    if (!recorder || recorder.state !== 'recording') return null
+    // Ask the recorder to hand over what it has buffered, so the end of the sentence is included.
+    await new Promise<void>((resolve) => {
+      const done = () => resolve()
+      recorder.addEventListener('dataavailable', done, { once: true })
+      try {
+        recorder.requestData()
+      } catch {
+        resolve()
+      }
+      window.setTimeout(done, 500) // never wait on it for long
+    })
+    if (chunksRef.current.length === 0) return null
+    return new Blob(chunksRef.current, { type: mimeTypeRef.current })
+  }, [])
+
   // Get all recorded audio and clear
   const getRecordedBlob = useCallback(() => {
     if (chunksRef.current.length > 0) {
@@ -505,6 +525,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     startRecording,
     stopRecording,
     stopRecordingAndGetBlob,
+    getSnapshotBlob,
     getRecordedBlob,
     clearRecording,
   }

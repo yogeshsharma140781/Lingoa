@@ -651,6 +651,9 @@ class UserMessage(BaseModel):
     translation_pending: Optional[dict] = None
     # Whisper-detected language for the user's utterance (from /api/transcribe verbose_json)
     detected_language: Optional[str] = None
+    # If set, the reply's voice is generated server-side right after the text and sent back on the
+    # same stream (saves the phone a separate round trip). The value is the playback speed.
+    tts_speed: Optional[float] = None
 
 class TextToSpeechRequest(BaseModel):
     text: str
@@ -1687,15 +1690,28 @@ async def respond_to_user(data: UserMessage):
             if session["target_language"] == "hi":
                 full_response = enforce_hindi_female_self_reference(full_response)
             elif session["target_language"] != "en":
-                # Ensure final text is in the selected target language (role-play was slipping into English)
-                before = full_response
-                full_response = await ensure_target_language(full_response, session["target_language"])
-                if before != full_response:
-                    print(f"[LANG ENFORCER] rewrote {session['target_language']}: {before[:80]!r} -> {full_response[:80]!r}")
+                # Role-play used to slip into English, so replies get checked - but only the ones that
+                # plausibly aren't in the target language (a whole extra model call otherwise).
+                if reply_needs_language_check(full_response, session["target_language"]):
+                    before = full_response
+                    full_response = await ensure_target_language(full_response, session["target_language"])
+                    if before != full_response:
+                        print(f"[LANG ENFORCER] rewrote {session['target_language']}: {before[:80]!r} -> {full_response[:80]!r}")
+                else:
+                    print("[LANG ENFORCER] skipped (reply already looks like the target language)")
 
             # Save assistant response
             session["messages"].append({"role": "assistant", "content": full_response})
             yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': full_response, 'target_language': session.get('target_language')})}\n\n"
+
+            # The voice rides on the same stream, right behind the text, so the phone doesn't need a
+            # separate request. If it fails the client just asks /api/tts itself, as before.
+            if data.tts_speed is not None and full_response.strip():
+                try:
+                    audio_bytes = await synthesize_speech_bytes(full_response, session.get("target_language", "en"), data.tts_speed)
+                    yield f"data: {json.dumps({'type': 'audio', 'audio': base64.b64encode(audio_bytes).decode('utf-8'), 'format': 'mp3'})}\n\n"
+                except Exception as audio_error:
+                    print(f"[RESPOND] Voice generation failed, client will fall back: {audio_error}")
             
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -2118,6 +2134,32 @@ def likely_in_target_language(text: str, target_language: str) -> bool:
     # Trust Whisper's transcription - don't reject based on English detection
     # (Removed looks_like_english check - trust the forced language)
     return True
+
+# English words that are not also common words in the Latin-script languages we teach (so "was",
+# "will", "we", "can", "is", "in" - German/Dutch/Spanish words too - are deliberately NOT here).
+_ENGLISH_MARKERS = {
+    "the", "and", "you", "your", "what", "how", "are", "were", "have", "has", "with", "that", "this",
+    "not", "but", "would", "about", "from", "there", "here", "they", "great", "nice", "really",
+    "thank", "thanks", "please", "tell", "good", "yes", "sorry", "let's", "it's", "i'm", "don't",
+    "doesn't", "didn't", "isn't", "i'd", "i'll", "you're", "that's",
+}
+
+def reply_needs_language_check(text: str, target_language: str) -> bool:
+    """
+    Should the AI's reply go through the (slow, extra) language-enforcer call?
+    Only when it plausibly isn't in the target language. The model almost always answers in the right
+    language, so skipping the check on those saves about a second per turn.
+    """
+    if not text or target_language == "en":
+        return False
+    if target_language in ("hi", "zh", "ja", "ko"):
+        # Right script present? Then it's in the language. Heavy Latin text means it slipped into English.
+        if not likely_in_target_language(text, target_language):
+            return True
+        letters = re.findall(r"[A-Za-z]", text)
+        return len(letters) > 0.3 * max(len(text.replace(" ", "")), 1)
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    return any(w in _ENGLISH_MARKERS for w in words)
 
 def looks_garbled_transcript(text: str, target_language: str) -> bool:
     """
@@ -2702,60 +2744,54 @@ async def ensure_target_language(text: str, target_language: str) -> str:
         print(f"[LANG GUARD] Rewrite failed: {e}")
         return text
 
-@app.post("/api/tts")
-async def text_to_speech(data: TextToSpeechRequest):
-    """Generate speech from text using ElevenLabs (primary) or OpenAI (fallback)"""
-    print(f"[TTS] Generating audio for: {data.text[:80]}...")
-    print(f"[TTS] Language: {data.language}, Speed: {data.speed}")
-    
-    # Try ElevenLabs first if configured, then fallback to OpenAI
+async def synthesize_speech_bytes(text: str, language: str, speed: float) -> bytes:
+    """Speak `text`: ElevenLabs first (if configured), OpenAI as the fallback. Raises if both fail."""
     elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
     use_elevenlabs = (
         elevenlabs_key and len(elevenlabs_key) > 10
         and os.getenv("DISABLE_ELEVENLABS") != "true"
         and os.getenv("TTS_PROVIDER", "elevenlabs").lower() != "openai"
     )
-    
+
     if use_elevenlabs:
         try:
             print("[TTS] Attempting ElevenLabs...")
             tts = get_tts_provider(client)
-            
+
             # Only try ElevenLabs if it's actually the provider
             if isinstance(tts, ElevenLabsTTSProvider):
-                audio_content = await tts.generate_speech(
-                    text=data.text,
-                    language=data.language,
-                    speed=data.speed
-                )
-                
-                audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+                audio_content = await tts.generate_speech(text=text, language=language, speed=speed)
                 print(f"[TTS] ✅ ElevenLabs generated {len(audio_content)} bytes")
-                return {"audio": audio_base64, "format": "mp3"}
+                return audio_content
             else:
                 print("[TTS] Provider is not ElevenLabs, using OpenAI")
         except Exception as e:
             error_msg = str(e)
             print(f"[TTS ERROR] ElevenLabs failed: {error_msg}")
-            
+
             # If it's a 401 (blocked account), suggest disabling ElevenLabs
             if "401" in error_msg or "blocked" in error_msg.lower() or "unusual activity" in error_msg.lower():
                 print("[TTS] ⚠️ ElevenLabs account appears blocked. Set DISABLE_ELEVENLABS=true to skip ElevenLabs.")
-            
+
             print("[TTS] Falling back to OpenAI...")
-    
+
     # OpenAI fallback (always available)
+    print("[TTS] Using OpenAI TTS...")
+    text_to_speak = text
+    if language == "hi":
+        text_to_speak = add_pauses_for_hindi(text)
+    audio_content = await synthesize_with_openai(text_to_speak, language, speed)
+    print(f"[TTS] ✅ OpenAI generated {len(audio_content)} bytes")
+    return audio_content
+
+@app.post("/api/tts")
+async def text_to_speech(data: TextToSpeechRequest):
+    """Generate speech from text using ElevenLabs (primary) or OpenAI (fallback)"""
+    print(f"[TTS] Generating audio for: {data.text[:80]}...")
+    print(f"[TTS] Language: {data.language}, Speed: {data.speed}")
     try:
-        print("[TTS] Using OpenAI TTS...")
-        text_to_speak = data.text
-        if data.language == "hi":
-            text_to_speak = add_pauses_for_hindi(data.text)
-        
-        audio_content = await synthesize_with_openai(text_to_speak, data.language, data.speed)
-        
-        audio_base64 = base64.b64encode(audio_content).decode('utf-8')
-        print(f"[TTS] ✅ OpenAI generated {len(audio_content)} bytes")
-        return {"audio": audio_base64, "format": "mp3"}
+        audio_content = await synthesize_speech_bytes(data.text, data.language, data.speed)
+        return {"audio": base64.b64encode(audio_content).decode('utf-8'), "format": "mp3"}
     except Exception as fallback_error:
         print(f"[TTS FALLBACK ERROR] {fallback_error}")
         import traceback

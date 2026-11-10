@@ -73,6 +73,7 @@ export function ConversationScreen() {
   const [inGrace, setInGrace] = useState(false) // the last second before auto-submit: speaking again cancels it
   const [turnStarted, setTurnStarted] = useState(false) // user has said something in the current turn
   const [showHistory, setShowHistory] = useState(false)
+  const [stage, setStage] = useState<'transcribing' | 'thinking' | null>(null) // what the app is doing after a turn is sent
   const [praise, setPraise] = useState<Praise | null>(null) // a cheer after a real attempt in the target language
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [helpDismissed, setHelpDismissed] = useState(false) // user closed the suggestions for this AI message
@@ -104,6 +105,10 @@ export function ConversationScreen() {
   const lastStruggleRef = useRef<{ reason: string; at: number } | null>(null)
   const longSilenceTurnRef = useRef(-1)
   const goalLoggedRef = useRef(false)
+  // Transcription started during the grace window, before we were sure they'd finished. If they
+  // say nothing more it's already under way (or done) when the turn is sent; if they do, it's ignored.
+  const speculativeRef = useRef<{ speechMs: number; promise: ReturnType<typeof transcribeAudio> } | null>(null)
+  const graceStartedAtRef = useRef<number | null>(null)
 
   const lastAiText = [...conversationHistory].reverse().find((m) => m.role === 'assistant')?.content ?? ''
   const lastUserText = [...conversationHistory].reverse().find((m) => m.role === 'user')?.content ?? ''
@@ -184,7 +189,7 @@ export function ConversationScreen() {
   }, [setMicPermission])
 
   // No auto-trigger - we only use the Done button
-  const { volume, startRecording, stopRecording, stopRecordingAndGetBlob } = useVoiceActivity({
+  const { volume, startRecording, stopRecording, stopRecordingAndGetBlob, getSnapshotBlob } = useVoiceActivity({
     silenceTimeout: 600, // Pause timer after 0.6s of silence for responsive pausing
     chunkIntervalMs: 2000, // 2s chunks for streaming-ish transcription
     // The "speech" turned out to be steady background noise: the user hasn't spoken yet, so
@@ -356,6 +361,19 @@ export function ConversationScreen() {
     }
   }, [setMicPermission, logEvent])
 
+  const startSpeculation = () => {
+    const speechMs = turnSpeechMsRef.current
+    lastChunkTsRef.current = Date.now() // keep the live-chunk transcriber quiet for the chunk this flushes
+    const promise = (async () => {
+      const snapshot = await getSnapshotBlob()
+      if (!snapshot || snapshot.size < 200) return null
+      return transcribeAudio(snapshot, targetLanguage)
+    })()
+    speculativeRef.current = { speechMs, promise }
+  }
+  const startSpeculationRef = useRef(startSpeculation)
+  startSpeculationRef.current = startSpeculation
+
   // Handle "Done" - triggered either by tapping the button or by auto-submit
   // after a pause in speech. Guarded so both paths can't double-fire.
   const handleDone = async (trigger: 'auto' | 'manual' = 'manual', silenceWaitMs: number | null = null) => {
@@ -374,6 +392,8 @@ export function ConversationScreen() {
       : null
     const turnIndex = turnIndexRef.current + 1 // 1-based
     const startedAt = performance.now() // for response_timing
+    const graceStartedAt = graceStartedAtRef.current // when "Got it, sending..." began (null if sent by tapping Done)
+    graceStartedAtRef.current = null
     const logTurn = (text: string) => {
       const trimmed = text.trim()
       logEvent('turn_submitted', {
@@ -398,25 +418,45 @@ export function ConversationScreen() {
 
     setIsWaitingForUser(false)
     setIsProcessing(true)
+    setStage('transcribing')
     setUserTranscript('Transcribing...')
     setCurrentYouMeant(null)
 
+    let stopPromise: Promise<Blob | null> | null = null
     try {
-    // Stop recording and wait for MediaRecorder to flush final chunk (Safari/WKWebView needs this)
+    // Transcription may already be under way from the grace window. It's only good if they haven't
+    // said anything since it started (their speech time hasn't moved).
+    const spec = speculativeRef.current
+    speculativeRef.current = null
+    const speculationValid = !!spec && spec.speechMs === turnSpeechMsRef.current
+
+    // Stop the recorder (Safari/WKWebView needs a moment to flush its final chunk). We only have to
+    // wait for that blob when there's no usable head start.
     console.log('[handleDone] Calling stopRecordingAndGetBlob...')
-    const blob = await stopRecordingAndGetBlob()
-    console.log('[handleDone] Got blob:', blob?.size, 'bytes, type:', blob?.type)
+    stopPromise = stopRecordingAndGetBlob()
+    let blob: Blob | null = null
+    if (!speculationValid) {
+      blob = await stopPromise
+      console.log('[handleDone] Got blob:', blob?.size, 'bytes, type:', blob?.type)
+    }
     
-    if (blob && blob.size > 0) {
+    if (speculationValid || (blob && blob.size > 0)) {
       try {
         // Always use target language as hint to help Whisper interpret imperfect pronunciation
         // During translation repeat step, we still pass targetLanguage to bias toward correct language
-        let transcription = await transcribeAudio(blob, targetLanguage)
-        // null = the request failed or timed out (an empty result is not null). Try once more
-        // with the same recording before giving up, so a hiccup doesn't cost them their sentence.
-        if (transcription === null) {
-          console.warn('[handleDone] Transcription failed, retrying once')
-          transcription = await transcribeAudio(blob, targetLanguage)
+        let transcription = speculationValid ? await spec!.promise : await transcribeAudio(blob!, targetLanguage)
+        // null = the request failed or timed out (an empty result is not null). Try once more with the
+        // final recording before giving up, so a hiccup doesn't cost them their sentence.
+        // An empty result from the head-start snapshot is also not trusted: the snapshot may have been cut
+        // short, so check the real recording before telling them nobody spoke.
+        const emptyHeadStart = speculationValid && transcription !== null && !transcription.text?.trim()
+        if (transcription === null || emptyHeadStart) {
+          console.warn(emptyHeadStart ? '[handleDone] Head-start came back empty, checking the final recording' : '[handleDone] Transcription failed, retrying once')
+          blob = blob ?? await stopPromise
+          if (blob && blob.size > 0) {
+            const second = await transcribeAudio(blob, targetLanguage)
+            if (second !== null) transcription = second
+          }
         }
         const transcribeMs = Math.round(performance.now() - startedAt)
         
@@ -452,10 +492,7 @@ export function ConversationScreen() {
             }
           }
           
-          // No filler sounds while thinking
-          
-          // Minimal delay to show transcript (reduced from 600ms)
-          await new Promise(r => setTimeout(r, 200))
+          setStage('thinking')
 
           // Clear right before we start streaming the next AI response, so the
           // previous AI question stays visible while the user is speaking.
@@ -466,11 +503,25 @@ export function ConversationScreen() {
             addMessage('user', transcript.trim())
           }
           
-          const response = await getAiResponse(transcript, transcription?.detectedLanguage ?? null)
+          // The server sends the spoken version right behind the text on the same stream. The text goes
+          // on screen as soon as it's complete, while the voice is still arriving.
+          let finalTextShown = false
+          let aiTextReadyMs: number | null = null
+          const reply = await getAiResponse(transcript, transcription?.detectedLanguage ?? null, {
+            withVoice: true,
+            onFinalText: (text) => {
+              aiTextReadyMs = Math.round(performance.now() - startedAt)
+              if (text.trim()) {
+                finalTextShown = true
+                addMessage('assistant', text.trim())
+                setUserTranscript('')
+              }
+            },
+          })
           
           // Clear translation card AFTER processing response
           // Only clear if user didn't explicitly ask for translation (check if transcript looks like translation request)
-          const aiTextMs = Math.round(performance.now() - startedAt)
+          const aiTextMs = aiTextReadyMs ?? Math.round(performance.now() - startedAt)
           const isTranslationRequest = /\b(how\s+do\s+(?:you|i)\s+say|what'?s?\s+.+\s+in|translate)\b/i.test(transcript)
           if (isTranslationRequest) signalStruggle('asked_translation')
           if (!isTranslationRequest) {
@@ -480,14 +531,26 @@ export function ConversationScreen() {
             }, 100)
           }
           
-          if (response && response.trim()) {
-            // Add AI response to history
-            addMessage('assistant', response.trim())
-            setUserTranscript('')
+          if (reply && reply.text.trim()) {
+            if (!finalTextShown) {
+              addMessage('assistant', reply.text.trim())
+              setUserTranscript('')
+            }
             // How long the user waited, from the moment we sent their turn off until the AI's voice began.
             let audioStartMs: number | null = null
-            await textToSpeech(response, () => { audioStartMs = Math.round(performance.now() - startedAt) })
-            logEvent('response_timing', { transcribe_ms: transcribeMs, ai_text_ms: aiTextMs, audio_start_ms: audioStartMs })
+            let audioStartFromGraceMs: number | null = null
+            await textToSpeech(reply.text, () => {
+              audioStartMs = Math.round(performance.now() - startedAt)
+              if (graceStartedAt !== null) audioStartFromGraceMs = Date.now() - graceStartedAt
+            }, reply.audio ?? undefined)
+            logEvent('response_timing', {
+              transcribe_ms: transcribeMs,
+              ai_text_ms: aiTextMs,
+              audio_start_ms: audioStartMs,
+              audio_start_from_grace_ms: audioStartFromGraceMs, // "Got it, sending..." -> the AI's voice
+              speculative: speculationValid,
+              voice_with_reply: !!reply.audio,
+            })
           } else {
             // We heard them, but no reply came back (error or timeout): tell them, then let them go again.
             logEvent('turn_failed', { stage: 'respond', ai_text_ms: aiTextMs })
@@ -517,7 +580,7 @@ export function ConversationScreen() {
         setUserTranscript('')
       }
     } else {
-      console.warn('[handleDone] No audio blob or empty blob:', blob?.size, 'bytes')
+      console.warn('[handleDone] No audio blob or empty blob:', (blob as Blob | null)?.size, 'bytes')
       logTurn('')
       noteEmptyTurn()
       setUserTranscript('(No audio recorded)')
@@ -526,6 +589,9 @@ export function ConversationScreen() {
     }
     } finally {
       setIsProcessing(false)
+      setStage(null)
+      // The recorder was stopped in parallel with the work above; make sure it's finished before reopening it.
+      await stopPromise?.catch(() => null)
 
       // Restart recording for next turn
       turnIndexRef.current = turnIndex
@@ -636,6 +702,8 @@ export function ConversationScreen() {
         graceCancelsRef.current += 1
         graceActiveRef.current = false
       }
+      speculativeRef.current = null // they're still talking: whatever was started is out of date
+      graceStartedAtRef.current = null
       const now = Date.now()
       if (firstSpeechAtRef.current === null) firstSpeechAtRef.current = now
       if (lastSpeechEndAtRef.current !== null) {
@@ -663,6 +731,8 @@ export function ConversationScreen() {
     const silenceTimerId = window.setTimeout(() => {
       graceActiveRef.current = true
       setInGrace(true)
+      graceStartedAtRef.current = Date.now()
+      startSpeculationRef.current() // get a head start on transcribing; thrown away if they speak again
       graceTimerId = window.setTimeout(() => {
         graceActiveRef.current = false
         handleDoneRef.current('auto', totalWaitMs)
@@ -1434,12 +1504,7 @@ export function ConversationScreen() {
               scale: isSpeaking && !isProcessing ? 1 + volume * 0.05 : 1,
             }}
           >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
-                <span className="text-yellow-400 text-sm font-medium">Processing...</span>
-              </>
-            ) : isAiSpeaking ? (
+            {isAiSpeaking ? (
               <>
                 <div className="flex items-center gap-0.5">
                   {[...Array(4)].map((_, i) => (
@@ -1452,6 +1517,13 @@ export function ConversationScreen() {
                   ))}
                 </div>
                 <span className="text-accent-400 text-sm font-medium">AI Speaking</span>
+              </>
+            ) : isProcessing ? (
+              <>
+                <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
+                <span className="text-yellow-400 text-sm font-medium">
+                  {stage === 'thinking' ? 'Thinking...' : 'Transcribing...'}
+                </span>
               </>
             ) : isWaitingForUser ? (
               <>
