@@ -23,6 +23,25 @@ export interface ReplySuggestion {
   english: string  // Short English hint
 }
 
+// A request that never answers must not freeze the app: give up after `ms` so the
+// caller can recover (retry, or tell the user) instead of waiting forever.
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// How long we wait on the server at each step of a turn.
+const TRANSCRIBE_TIMEOUT_MS = 20000 // a normal transcription takes a few seconds
+const RESPOND_TIMEOUT_MS = 30000     // until the reply starts coming back
+const STREAM_STALL_MS = 20000        // ...and between pieces of the reply
+const TTS_FETCH_TIMEOUT_MS = 30000
+const TTS_PLAYBACK_CAP_MS = 60000    // a spoken reply is never this long; stop waiting on audio that hangs
+
 // Module-level audio tracking for interruptibility
 let currentAudio: HTMLAudioElement | null = null
 let audioUrls: string[] = [] // Track URLs for cleanup
@@ -217,7 +236,8 @@ export function useApi() {
       | 'translate_tapped'
       | 'history_opened'
       | 'goal_reached'
-      | 'transcribe_failed',
+      | 'transcribe_failed'
+      | 'turn_failed',
     metadata?: Record<string, unknown>
   ) => {
     // Capture the session now: the screen may reset it before the request is built.
@@ -379,10 +399,10 @@ export function useApi() {
       const sessionParam = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''
       // Task 1: skip improvement pass for faster transcription
       const improveParam = '&improve_sentence=false'
-      const res = await fetch(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}`, {
         method: 'POST',
         body: formData,
-      })
+      }, TRANSCRIBE_TIMEOUT_MS)
 
       if (res.ok) {
         const data = await res.json()
@@ -439,7 +459,7 @@ export function useApi() {
     if (!sessionId) return null
 
     try {
-      const res = await fetch(`${API_BASE}/conversation/respond`, {
+      const res = await fetchWithTimeout(`${API_BASE}/conversation/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -455,7 +475,7 @@ export function useApi() {
             : null,
           detected_language: detectedLanguage ?? null,
         }),
-      })
+      }, RESPOND_TIMEOUT_MS)
 
       if (!res.ok) return null
 
@@ -466,7 +486,22 @@ export function useApi() {
       let fullResponse = ''
 
       while (true) {
-        const { done, value } = await reader.read()
+        // If the stream goes quiet, stop waiting: keep what we have rather than hang.
+        let stallTimer: ReturnType<typeof setTimeout> | undefined
+        const stalled = new Promise<never>((_, reject) => {
+          stallTimer = setTimeout(() => reject(new Error('reply stream stalled')), STREAM_STALL_MS)
+        })
+        let chunkResult: ReadableStreamReadResult<Uint8Array>
+        try {
+          chunkResult = await Promise.race([reader.read(), stalled])
+        } catch (stallErr) {
+          console.warn('[getAiResponse]', stallErr)
+          reader.cancel().catch(() => {})
+          break
+        } finally {
+          clearTimeout(stallTimer)
+        }
+        const { done, value } = chunkResult
         if (done) break
 
         const chunk = decoder.decode(value)
@@ -535,7 +570,21 @@ export function useApi() {
       // Use regular TTS endpoint - it handles ElevenLabs with OpenAI fallback automatically
       // This is more reliable than trying streaming first
       const actualSpeed = getActualSpeed(audioSpeed, targetLanguage)
-      await playRegularTTS(text, targetLanguage, actualSpeed, setIsAiSpeaking, onPlaybackStart)
+      // Never wait forever on audio that hangs (a stuck player would otherwise block the whole turn).
+      let capTimer: ReturnType<typeof setTimeout> | undefined
+      const cap = new Promise<void>((resolve) => {
+        capTimer = setTimeout(() => {
+          console.warn('[TTS] Playback took too long; giving up on it')
+          stopAllAudio()
+          setIsAiSpeaking(false)
+          resolve()
+        }, TTS_PLAYBACK_CAP_MS)
+      })
+      try {
+        await Promise.race([playRegularTTS(text, targetLanguage, actualSpeed, setIsAiSpeaking, onPlaybackStart), cap])
+      } finally {
+        clearTimeout(capTimer)
+      }
     } catch (err) {
       console.error('[TTS] Error:', err)
       setIsAiSpeaking(false)
@@ -559,11 +608,11 @@ export function useApi() {
     }
     
     try {
-      const res = await fetch(`${API_BASE}/tts`, {
+      const res = await fetchWithTimeout(`${API_BASE}/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, language, speed }),
-      })
+      }, TTS_FETCH_TIMEOUT_MS)
 
       if (!res.ok) {
         setIsAiSpeaking(false)

@@ -411,7 +411,13 @@ export function ConversationScreen() {
       try {
         // Always use target language as hint to help Whisper interpret imperfect pronunciation
         // During translation repeat step, we still pass targetLanguage to bias toward correct language
-        const transcription = await transcribeAudio(blob, targetLanguage)
+        let transcription = await transcribeAudio(blob, targetLanguage)
+        // null = the request failed or timed out (an empty result is not null). Try once more
+        // with the same recording before giving up, so a hiccup doesn't cost them their sentence.
+        if (transcription === null) {
+          console.warn('[handleDone] Transcription failed, retrying once')
+          transcription = await transcribeAudio(blob, targetLanguage)
+        }
         const transcribeMs = Math.round(performance.now() - startedAt)
         
         if (transcription?.text && transcription.text.trim()) {
@@ -482,14 +488,28 @@ export function ConversationScreen() {
             let audioStartMs: number | null = null
             await textToSpeech(response, () => { audioStartMs = Math.round(performance.now() - startedAt) })
             logEvent('response_timing', { transcribe_ms: transcribeMs, ai_text_ms: aiTextMs, audio_start_ms: audioStartMs })
+          } else {
+            // We heard them, but no reply came back (error or timeout): tell them, then let them go again.
+            logEvent('turn_failed', { stage: 'respond', ai_text_ms: aiTextMs })
+            setUserTranscript('Couldn\'t get a reply. Please try again.')
+            await new Promise(r => setTimeout(r, 2500))
+            setUserTranscript('')
           }
         } else {
           console.warn('[handleDone] No speech detected in transcription result:', transcription)
-          if (transcription === null) logEvent('transcribe_failed')
-          logTurn('')
-          noteEmptyTurn()
-          setUserTranscript('(No speech detected)')
-          await new Promise(r => setTimeout(r, 1000))
+          if (transcription === null) {
+            // The server never answered (even after a retry): say so, instead of claiming they were silent.
+            logEvent('transcribe_failed')
+            logEvent('turn_failed', { stage: 'transcribe' })
+            logTurn('')
+            setUserTranscript('Couldn\'t send that. Please say it again.')
+            await new Promise(r => setTimeout(r, 2500))
+          } else {
+            logTurn('')
+            noteEmptyTurn()
+            setUserTranscript('(No speech detected)')
+            await new Promise(r => setTimeout(r, 1000))
+          }
           setUserTranscript('')
         }
       } catch (err) {

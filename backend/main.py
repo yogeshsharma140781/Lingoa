@@ -41,7 +41,8 @@ FRONTEND_BUILD_PATH = Path(__file__).parent.parent / "frontend" / "dist"
 IS_PRODUCTION = FRONTEND_BUILD_PATH.exists()
 
 # Initialize OpenAI client
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Fail fast instead of the default 10-minute wait: a stalled OpenAI call must not freeze a turn.
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=45.0, max_retries=1)
 
 # Build/version info (useful for debugging deploys)
 APP_BUILD_TAG = "translation-pending-gate-v3"
@@ -74,6 +75,7 @@ ALLOWED_CLIENT_EVENT_TYPES = {
     "history_opened",
     "goal_reached",
     "transcribe_failed",
+    "turn_failed",
 }
 
 # In-memory: active conversation state only (lives for the duration of one
