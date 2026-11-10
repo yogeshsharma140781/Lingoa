@@ -28,6 +28,11 @@ export function silenceWaitMs(turnSpeechMs: number): number {
   return turnSpeechMs < SHORT_PHRASE_SPEECH_MS ? SILENCE_WAIT_SHORT_PHRASE_MS : SILENCE_WAIT_MS
 }
 
+// A turn with less detected speech than this is not sent. The voice detector's own pause (0.6s)
+// counts as speech, so a lone noise blip already registers as ~0.6-0.8s; real words (even a single
+// "Ja") come out at about 0.9s or more. Sending a blip makes the transcriber invent a sentence out of near-silence.
+export const MIN_TURN_SPEECH_MS = 900
+
 // No speech at all this long after the AI finished talking is logged as a
 // "struggle" moment (they may not know what to say, or doubt it will work).
 export const LONG_SILENCE_MS = 15000

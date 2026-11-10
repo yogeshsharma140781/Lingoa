@@ -6,7 +6,7 @@ import { useStore } from '../store'
 import { useApi, unlockAudio, type ReplySuggestion } from '../hooks/useApi'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { isPraiseworthy, pickPraise, goalPraise, type Praise } from '../encouragement'
-import { VAD_PAUSE_MS, GRACE_MS, SUGGESTIONS_AUTO_OPEN_MS, LONG_SILENCE_MS, silenceWaitMs } from '../hooks/turnTiming'
+import { VAD_PAUSE_MS, GRACE_MS, SUGGESTIONS_AUTO_OPEN_MS, LONG_SILENCE_MS, MIN_TURN_SPEECH_MS, silenceWaitMs } from '../hooks/turnTiming'
 import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { CorrectionCard } from './CorrectionCard'
 import { TranslationCard } from './TranslationCard'
@@ -363,11 +363,12 @@ export function ConversationScreen() {
 
   const startSpeculation = () => {
     const speechMs = turnSpeechMsRef.current
+    if (speechMs < MIN_TURN_SPEECH_MS) return // a blip of noise: nothing worth sending
     lastChunkTsRef.current = Date.now() // keep the live-chunk transcriber quiet for the chunk this flushes
     const promise = (async () => {
       const snapshot = await getSnapshotBlob()
       if (!snapshot || snapshot.size < 200) return null
-      return transcribeAudio(snapshot, targetLanguage)
+      return transcribeAudio(snapshot, targetLanguage, speechMs)
     })()
     speculativeRef.current = { speechMs, promise }
   }
@@ -381,6 +382,28 @@ export function ConversationScreen() {
     isHandlingDoneRef.current = true
     setAutoSubmitPending(false)
     setInGrace(false)
+
+    // Hardly any speech was heard (a noise blip, or Done tapped with nothing said): don't send it. The
+    // transcriber would invent a sentence out of near-silence ("Ik wens u nog een fijne avond").
+    if (turnSpeechMsRef.current < MIN_TURN_SPEECH_MS) {
+      logEvent('turn_skipped', { trigger, speech_ms: Math.round(turnSpeechMsRef.current) })
+      incrementSpeakingTime(-turnSpeechMsRef.current) // give back time the noise was counted as speech
+      speculativeRef.current = null
+      graceStartedAtRef.current = null
+      setIsWaitingForUser(false)
+      await stopRecordingAndGetBlob().catch(() => null) // throw the recording away
+      if (trigger === 'manual') {
+        // They tapped Done themselves, so tell them; a noise blip that sent itself needs no message.
+        setUserTranscript('Didn\'t hear anything. Please try again.')
+        await new Promise(r => setTimeout(r, 1800))
+        setUserTranscript('')
+      }
+      resetTurnState()
+      startRecording()
+      setIsWaitingForUser(true)
+      isHandlingDoneRef.current = false
+      return
+    }
 
     // Snapshot the shape of this turn now; the event is logged once we know how
     // much they actually said (so we can see if short submissions are cut-offs).
@@ -444,7 +467,7 @@ export function ConversationScreen() {
       try {
         // Always use target language as hint to help Whisper interpret imperfect pronunciation
         // During translation repeat step, we still pass targetLanguage to bias toward correct language
-        let transcription = speculationValid ? await spec!.promise : await transcribeAudio(blob!, targetLanguage)
+        let transcription = speculationValid ? await spec!.promise : await transcribeAudio(blob!, targetLanguage, turnSpeechMs)
         // null = the request failed or timed out (an empty result is not null). Try once more with the
         // final recording before giving up, so a hiccup doesn't cost them their sentence.
         // An empty result from the head-start snapshot is also not trusted: the snapshot may have been cut
@@ -454,7 +477,7 @@ export function ConversationScreen() {
           console.warn(emptyHeadStart ? '[handleDone] Head-start came back empty, checking the final recording' : '[handleDone] Transcription failed, retrying once')
           blob = blob ?? await stopPromise
           if (blob && blob.size > 0) {
-            const second = await transcribeAudio(blob, targetLanguage)
+            const second = await transcribeAudio(blob, targetLanguage, turnSpeechMs)
             if (second !== null) transcription = second
           }
         }
@@ -729,6 +752,12 @@ export function ConversationScreen() {
     const totalWaitMs = silenceWaitMs(turnSpeechMsRef.current)
     let graceTimerId: number | undefined
     const silenceTimerId = window.setTimeout(() => {
+      // Barely any speech (a noise blip): there's nothing to confirm, so skip the "sending..." step;
+      // handleDone discards it quietly.
+      if (turnSpeechMsRef.current < MIN_TURN_SPEECH_MS) {
+        handleDoneRef.current('auto', totalWaitMs)
+        return
+      }
       graceActiveRef.current = true
       setInGrace(true)
       graceStartedAtRef.current = Date.now()

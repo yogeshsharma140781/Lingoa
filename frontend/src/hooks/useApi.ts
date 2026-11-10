@@ -237,7 +237,8 @@ export function useApi() {
       | 'history_opened'
       | 'goal_reached'
       | 'transcribe_failed'
-      | 'turn_failed',
+      | 'turn_failed'
+      | 'turn_skipped',
     metadata?: Record<string, unknown>
   ) => {
     // Capture the session now: the screen may reset it before the request is built.
@@ -369,7 +370,8 @@ export function useApi() {
   // Now includes intelligent sentence matching and improvement using conversation context
   const transcribeAudio = useCallback(async (
     audioBlob: Blob,
-    languageHint?: string | null
+    languageHint?: string | null,
+    speechMs?: number // how long the voice detector heard speech; lets the server reject invented text
   ): Promise<{ text: string; detectedLanguage?: string | null; validForTarget?: boolean; improvement?: any } | null> => {
     try {
       console.log('[transcribeAudio] Called with blob:', audioBlob?.size, 'bytes, type:', audioBlob?.type)
@@ -399,7 +401,8 @@ export function useApi() {
       const sessionParam = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''
       // Task 1: skip improvement pass for faster transcription
       const improveParam = '&improve_sentence=false'
-      const res = await fetchWithTimeout(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}`, {
+      const speechParam = speechMs !== undefined ? `&speech_ms=${Math.round(speechMs)}` : ''
+      const res = await fetchWithTimeout(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}${speechParam}`, {
         method: 'POST',
         body: formData,
       }, TRANSCRIBE_TIMEOUT_MS)

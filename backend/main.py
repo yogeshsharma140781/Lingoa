@@ -76,6 +76,7 @@ ALLOWED_CLIENT_EVENT_TYPES = {
     "goal_reached",
     "transcribe_failed",
     "turn_failed",
+    "turn_skipped",
 }
 
 # In-memory: active conversation state only (lives for the duration of one
@@ -1069,7 +1070,48 @@ Confidence guide:
 # all contain "amara.org" verbatim).
 KNOWN_HALLUCINATION_MARKERS = [
     "amara.org",
+    # Video-outro / subtitle-credit boilerplate (language by language). None of these is something a
+    # learner says to a conversation partner; short polite phrases like "dank u wel" are NOT listed
+    # because a learner really does say those.
+    "ondertitel",           # nl: "Ondertitels door ...", "Ondertiteld door ..."
+    "bedankt voor het kijken",
+    "abonneer",
+    "untertitel",           # de
+    "vielen dank fürs zuschauen",
+    "sous-titr",            # fr: sous-titres / sous-titrage
+    "merci d'avoir regardé",
+    "subtítulos",           # es
+    "gracias por ver",
+    "sottotitoli",          # it
+    "legendas pela",        # pt
+    "obrigado por assistir",
+    "thanks for watching",
+    "subtitles by",
+    "subscribe to",
+    "字幕",                  # zh / ja
+    "请不吝点赞",
+    "ご視聴ありがとうございました",
+    "시청해 주셔서 감사합니다",
 ]
+
+
+def implausible_for_speech_time(text: str, language: str, speech_ms: Optional[int]) -> bool:
+    """
+    Could this transcript really have been said in the time the app heard speech?
+    The app reports how long its voice detector saw speech (`speech_ms`, which includes a ~0.6s
+    tail after every burst). A noise blip registers as ~0.6-0.9s; if Whisper returns a whole
+    sentence for it, it invented the sentence (a classic hallucination on near-silence), because
+    people don't say more than ~6 words (or ~10 characters in zh/ja/ko) per second.
+    Only judged when the app told us the time and the transcript has at least 3 units.
+    """
+    if speech_ms is None or not text:
+        return False
+    voiced_s = max((speech_ms - 600) / 1000.0, 0.25)  # one tail removed: generous to the speaker
+    if language in ("zh", "ja", "ko"):
+        units, max_rate = len(re.sub(r"\s", "", text)), 10.0
+    else:
+        units, max_rate = len(text.split()), 6.0
+    return units >= 3 and units / voiced_s > max_rate
 
 
 def is_known_hallucination(text: str) -> bool:
@@ -1088,7 +1130,8 @@ async def transcribe_audio(
     hint: Optional[str] = Query(None),
     fallback_language: Optional[str] = Query(None),
     session_id: Optional[str] = Query(None),
-    improve_sentence: bool = Query(True)
+    improve_sentence: bool = Query(True),
+    speech_ms: Optional[int] = Query(None),  # how long the app's voice detector heard speech (for sanity-checking the result)
 ):
     """
     Transcribe audio using Whisper with two-pass strategy:
@@ -1248,8 +1291,8 @@ async def transcribe_audio(
         text, detected, used_hint, metrics = await _transcribe_once(hint_code if use_hint else None)
 
         # Guard against Whisper hallucinations on silence/background noise.
-        if _likely_no_speech(metrics, text) or is_known_hallucination(text):
-            print(f"[TRANSCRIBE] Likely no speech or known hallucination (metrics={metrics}, text={text[:80]!r}); treating transcript as empty")
+        if _likely_no_speech(metrics, text) or is_known_hallucination(text) or implausible_for_speech_time(text, language, speech_ms):
+            print(f"[TRANSCRIBE] Likely no speech or known hallucination (metrics={metrics}, speech_ms={speech_ms}, text={text[:80]!r}); treating transcript as empty")
             return {
                 "transcript": "",
                 "detected_language": detected,
