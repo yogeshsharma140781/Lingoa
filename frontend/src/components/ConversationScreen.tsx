@@ -187,6 +187,20 @@ export function ConversationScreen() {
   const { volume, startRecording, stopRecording, stopRecordingAndGetBlob } = useVoiceActivity({
     silenceTimeout: 600, // Pause timer after 0.6s of silence for responsive pausing
     chunkIntervalMs: 2000, // 2s chunks for streaming-ish transcription
+    // The "speech" turned out to be steady background noise: the user hasn't spoken yet, so
+    // forget it (otherwise the app would "send" a recording of nothing but noise) and take back
+    // the speaking time it counted.
+    onNoiseOnly: () => {
+      incrementSpeakingTime(-turnSpeechMsRef.current)
+      hasSpokenThisTurnRef.current = false
+      turnSpeechMsRef.current = 0
+      graceCancelsRef.current = 0
+      graceActiveRef.current = false
+      firstSpeechAtRef.current = null
+      lastSpeechEndAtRef.current = null
+      longestPauseMsRef.current = 0
+      setTurnStarted(false)
+    },
     onAudioData: async (blob) => {
       if (!isWaitingForUser || isProcessing || isAiSpeaking) return
       if (!blob || blob.size < 200) return
