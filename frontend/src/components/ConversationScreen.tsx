@@ -972,7 +972,7 @@ export function ConversationScreen() {
   // Loading state while checking permission
   if (safePermissionState === 'checking') {
     return (
-      <div className="h-full flex items-center justify-center bg-[#1c1917]">
+      <div className="h-full flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-primary-400 animate-spin" />
       </div>
     )
@@ -981,7 +981,7 @@ export function ConversationScreen() {
   // Show mic permission prompt screen (including requesting state)
   if (safePermissionState === 'prompt' || safePermissionState === 'requesting') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 bg-[#1c1917]">
+      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10">
         <div className="relative mb-8">
           <div className="w-32 h-32 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center glow-primary">
             <Mic className="w-16 h-16 text-white" />
@@ -1031,7 +1031,7 @@ export function ConversationScreen() {
   // Show mic permission denied state
   if (safePermissionState === 'denied') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 bg-[#1c1917]">
+      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10">
         <div className="w-24 h-24 rounded-full bg-red-500/20 flex items-center justify-center mb-6">
           <MicOff className="w-12 h-12 text-red-400" />
         </div>
@@ -1079,7 +1079,7 @@ export function ConversationScreen() {
     // Show error if there's a start error
     if (startError) {
       return (
-        <div className="h-full flex flex-col items-center justify-center p-6 bg-[#1c1917]">
+        <div className="h-full flex flex-col items-center justify-center p-6">
           <div className="text-center max-w-xs">
             <h2 className="text-2xl font-semibold mb-3 text-red-400">Error</h2>
             <p className="text-surface-400 mb-6">{startError}</p>
@@ -1112,7 +1112,7 @@ export function ConversationScreen() {
     
     // Show loading state while starting - use simple div to avoid animation issues
     return (
-      <div className="h-full flex items-center justify-center bg-[#1c1917]">
+      <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 text-primary-400 animate-spin mx-auto mb-4" />
           <p className="text-surface-400">Starting conversation...</p>
@@ -1124,7 +1124,7 @@ export function ConversationScreen() {
   // Only render main conversation if initialized
   if (!isInitialized) {
     return (
-      <div className="h-full flex items-center justify-center bg-[#1c1917]">
+      <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 text-primary-400 animate-spin mx-auto mb-4" />
           <p className="text-surface-400">Initializing...</p>
@@ -1141,7 +1141,7 @@ export function ConversationScreen() {
       className="h-full flex flex-col items-center relative z-10"
     >
       {/* Header */}
-      <div className="w-full flex items-center justify-between p-4 pt-4 bg-[#1c1917]/80 backdrop-blur-sm z-20">
+      <div className="w-full flex items-center justify-between p-4 pt-4 z-20">
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -1513,7 +1513,7 @@ export function ConversationScreen() {
       </AnimatePresence>
 
       {/* Bottom fixed area: Status + Done button + Timer */}
-      <div className="flex-shrink-0 w-full bg-[#1c1917] border-t border-surface-800 px-4 pt-3 pb-8">
+      <div className="flex-shrink-0 w-full px-4 pt-3 pb-4">
         {/* Status indicator + Done button row */}
         <div className="flex items-center justify-center gap-4 mb-4">
           {/* Subtle status indicator */}

@@ -69,7 +69,9 @@ export default function App() {
       <div className="floating-shape w-80 h-80 bg-accent-500 bottom-[-15%] right-[-10%] animate-float" style={{ animationDelay: '-3s' }} />
       <div className="floating-shape w-64 h-64 bg-primary-600 top-[40%] right-[-20%] animate-float" style={{ animationDelay: '-6s' }} />
       
-      {/* Main content */}
+      {/* Main content. The wrapper keeps screens clear of the notch / home indicator
+          while the gradient behind it still runs edge to edge. */}
+      <div className="h-full w-full safe-area">
       <AnimatePresence mode="wait">
         {currentScreen === 'home' && <HomeScreen key="home" />}
         {currentScreen === 'mode' && <ModeSelectionScreen key="mode" />}
@@ -80,6 +82,7 @@ export default function App() {
         {currentScreen === 'completion' && <CompletionScreen key="completion" />}
         {currentScreen === 'improvements' && <ImprovementsScreen key="improvements" />}
       </AnimatePresence>
+      </div>
     </div>
   )
 }
