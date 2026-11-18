@@ -18,11 +18,15 @@ export type ConversationEvent =
   | { type: 'AI_AUDIO_STARTED' }
   | { type: 'AI_AUDIO_ENDED' }
   | { type: 'SPEECH_STARTED' }
+  /** What sounded like speech turned out to be steady background noise. */
+  | { type: 'SPEECH_CANCELLED' }
   | { type: 'WAITING_TIMEOUT' }
   | { type: 'SHOW_HINT' }
   | { type: 'RESTING_TIMEOUT' }
   | { type: 'TAP_AVATAR' }
   | { type: 'TURN_ENDED' }
+  /** Nothing usable was heard (silence or noise): quietly listen again. */
+  | { type: 'TURN_DISCARDED' }
   | { type: 'EVALUATION_READY'; level: EvaluationLevel }
   | { type: 'CONTINUE' }
   | { type: 'TRY_AGAIN' }
@@ -48,6 +52,7 @@ export function transition(state: ConversationState, event: ConversationEvent): 
 
     case 'userSpeaking':
       if (event.type === 'TURN_ENDED') return { name: 'processing' }
+      if (event.type === 'SPEECH_CANCELLED') return { name: 'userListening' }
       return state
 
     case 'userWaiting':
@@ -69,6 +74,7 @@ export function transition(state: ConversationState, event: ConversationEvent): 
 
     case 'processing':
       if (event.type === 'EVALUATION_READY') return { name: 'feedback', level: event.level }
+      if (event.type === 'TURN_DISCARDED') return { name: 'userListening' }
       return state
 
     case 'feedback':

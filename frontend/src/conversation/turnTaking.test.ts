@@ -222,6 +222,28 @@ describe('a closed mic', () => {
   })
 })
 
+describe('cancelled speech (it was only noise)', () => {
+  it('goes back to waiting for real speech, without restarting the mic clock', () => {
+    const h = harness()
+    h.run(2, true) // sounded like speech
+    expect(h.types()).toEqual(['SPEECH_STARTED'])
+    h.taker.cancelSpeech()
+    h.run(10, false) // silence now: must NOT end a turn that never really started
+    // The mic opened 12 s ago, so "take your time" is due: the clock was not restarted.
+    expect(h.types()).toEqual(['SPEECH_STARTED', 'WAITING_TIMEOUT'])
+  })
+
+  it('real speech afterwards starts a normal turn', () => {
+    const h = harness()
+    h.run(1, true)
+    h.taker.cancelSpeech()
+    h.run(0.5, false)
+    h.run(1, true)
+    h.run(3, false)
+    expect(h.types()).toEqual(['SPEECH_STARTED', 'SPEECH_STARTED', 'TURN_ENDED'])
+  })
+})
+
 describe('debug snapshot', () => {
   it('reports the timers the overlay shows', () => {
     const h = harness()

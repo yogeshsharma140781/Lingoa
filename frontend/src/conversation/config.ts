@@ -85,3 +85,21 @@ export const REACTION_FALLBACKS: Record<string, { excellent: string; good: strin
   ja: { excellent: '素晴らしい！', good: 'よくできました！', almost: 'おしい！', retry: 'もう一度やってみましょう' },
   ko: { excellent: '훌륭해요!', good: '잘했어요!', almost: '거의 다 됐어요!', retry: '다시 해 보세요' },
 }
+
+/**
+ * What the learner is taken to have said when they press Skip, so the AI can move on
+ * naturally ("I don't know"). Used only when the learner said nothing usable.
+ */
+export const SKIP_UTTERANCES: Record<string, string> = {
+  en: "I don't know.",
+  es: 'No lo sé.',
+  fr: 'Je ne sais pas.',
+  de: 'Das weiß ich nicht.',
+  nl: 'Dat weet ik niet.',
+  it: 'Non lo so.',
+  pt: 'Não sei.',
+  hi: 'मुझे नहीं पता।',
+  zh: '我不知道。',
+  ja: 'わかりません。',
+  ko: '모르겠어요.',
+}

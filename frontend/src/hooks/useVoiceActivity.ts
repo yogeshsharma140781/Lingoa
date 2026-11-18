@@ -12,6 +12,9 @@ interface UseVoiceActivityOptions {
   // Called when a stretch that looked like speech turned out to be steady background noise
   // (the user never actually spoke). The caller should forget that it "heard speech".
   onNoiseOnly?: () => void
+  // Called on every audio frame with whether voice is heard right now (no hold-over, unlike
+  // isSpeaking) and the current level 0..1. Used by the patient turn-taker.
+  onFrame?: (frame: { voiced: boolean; level: number }) => void
 }
 
 export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
@@ -23,6 +26,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     onSpeechEnd,
     onAudioData,
     onNoiseOnly,
+    onFrame,
   } = options
 
   const { setIsSpeaking, setMicPermission, isAiSpeaking } = useStore()
@@ -59,6 +63,8 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const episodeAtMicOpenRef = useRef(false) // this stretch of "speech" began right as the mic opened
   const onNoiseOnlyRef = useRef(onNoiseOnly)
   onNoiseOnlyRef.current = onNoiseOnly
+  const onFrameRef = useRef(onFrame)
+  onFrameRef.current = onFrame
   // Safari/WKWebView often doesn't support audio/webm; prefer mp4/m4a when available.
   const mimeTypeRef = useRef<string>('audio/mp4')
   
@@ -377,6 +383,8 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     const silenceCut = isSpeakingRef.current
       ? Math.max(effectiveThreshold, speechPeakRef.current - RELATIVE_SILENCE_DB)
       : effectiveThreshold
+
+    onFrameRef.current?.({ voiced: db > silenceCut, level: normalizedVolume })
 
     if (db > silenceCut) {
       // Sound detected

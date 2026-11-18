@@ -11,8 +11,19 @@ import { TopicSelectionScreen } from './components/TopicSelectionScreen'
 import { RoleplaySelectionScreen } from './components/RoleplaySelectionScreen'
 import { CustomRoleplayScreen } from './components/CustomRoleplayScreen'
 import { ConversationScreen } from './components/ConversationScreen'
+import { LiveConversation } from './conversation/LiveConversation'
 import { CompletionScreen } from './components/CompletionScreen'
 import { ImprovementsScreen } from './components/ImprovementsScreen'
+
+// The redesigned conversation screen is the default. The previous one stays available for
+// comparison: add ?legacy to the address, or set localStorage 'lingoa_legacy_conversation' to '1'.
+const useLegacyConversation = (() => {
+  try {
+    return new URLSearchParams(window.location.search).has('legacy') || localStorage.getItem('lingoa_legacy_conversation') === '1'
+  } catch {
+    return false
+  }
+})()
 
 export default function App() {
   const { currentScreen, completedToday, streak, targetLanguage, targetTime } = useStore()
@@ -78,7 +89,7 @@ export default function App() {
         {currentScreen === 'topics' && <TopicSelectionScreen key="topics" />}
         {currentScreen === 'roleplay' && <RoleplaySelectionScreen key="roleplay" />}
         {currentScreen === 'custom-roleplay' && <CustomRoleplayScreen key="custom-roleplay" />}
-        {currentScreen === 'conversation' && <ConversationScreen key="conversation" />}
+        {currentScreen === 'conversation' && (useLegacyConversation ? <ConversationScreen key="conversation" /> : <LiveConversation key="conversation" />)}
         {currentScreen === 'completion' && <CompletionScreen key="completion" />}
         {currentScreen === 'improvements' && <ImprovementsScreen key="improvements" />}
       </AnimatePresence>

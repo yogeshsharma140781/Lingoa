@@ -954,6 +954,54 @@ export function useApi() {
     }
   }, [sessionId])
 
+  // How well did that answer go? Used by the conversation screen. null = the request failed
+  // (the caller treats that as "fine" so the conversation keeps moving).
+  const evaluateAnswer = useCallback(async (transcript: string): Promise<{
+    level: 'excellent' | 'good' | 'almost' | 'retry'
+    alternative: string | null
+    changedWords: string[]
+  } | null> => {
+    if (!sessionId) return null
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/conversation/evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, transcript }),
+      }, 12000)
+      if (!res.ok) return null
+      const data = await res.json()
+      if (!['excellent', 'good', 'almost', 'retry'].includes(data?.level)) return null
+      return {
+        level: data.level,
+        alternative: typeof data.alternative === 'string' && data.alternative.trim() ? data.alternative.trim() : null,
+        changedWords: Array.isArray(data.changed_words) ? data.changed_words.map(String) : [],
+      }
+    } catch (err) {
+      console.error('Evaluate error:', err)
+      return null
+    }
+  }, [sessionId])
+
+  // Two hints for the AI's last line: an answer and a phrase for buying time.
+  const getHints = useCallback(async (): Promise<{ answer: string; stall: string } | null> => {
+    if (!sessionId) return null
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/conversation/hints`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      }, 12000)
+      if (!res.ok) return null
+      const data = await res.json()
+      const stall = typeof data?.stall === 'string' ? data.stall.trim() : ''
+      if (!stall) return null
+      return { answer: typeof data?.answer === 'string' ? data.answer.trim() : '', stall }
+    } catch (err) {
+      console.error('Hints error:', err)
+      return null
+    }
+  }, [sessionId])
+
   return {
     fetchUserStats,
     logEvent,
@@ -969,5 +1017,7 @@ export function useApi() {
     analyzeUserSpeech,
     clearCorrection,
     getSuggestions,
+    evaluateAnswer,
+    getHints,
   }
 }

@@ -66,12 +66,14 @@ function Dots() {
 }
 
 /** The alternative sentence with the changed words in bold. */
-function Alternative({ text, changed }: { text: string; changed: string[] }) {
+function Alternative({ text, changed, language }: { text: string; changed: string[]; language: string }) {
   const set = new Set(changed.map((w) => w.toLowerCase()))
   const strip = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]+/gu, '')
+  // Chinese and Japanese have no spaces: the server compares them character by character.
+  const tokens = language === 'zh' || language === 'ja' ? Array.from(text) : text.split(/(\s+)/)
   return (
     <p className="conv-alt-text">
-      {text.split(/(\s+)/).map((token, i) =>
+      {tokens.map((token, i) =>
         /^\s+$/.test(token) ? (
           <Fragment key={i}>{token}</Fragment>
         ) : set.has(strip(token)) ? (
@@ -209,7 +211,7 @@ export function ConversationView(props: ConversationViewProps) {
           </section>
         )}
 
-        {view.showTranscript && evaluation && (
+        {view.showTranscript && evaluation && evaluation.transcript && (
           <>
             <div className="conv-said-label">YOU SAID</div>
             <p className="conv-said conv-serif" lang={language}>{evaluation.transcript}</p>
@@ -220,7 +222,7 @@ export function ConversationView(props: ConversationViewProps) {
           <section className="conv-card conv-alt" aria-label="Better alternative">
             <h2 className="conv-card-title" style={{ fontWeight: 400 }}>Better alternative</h2>
             <div className="conv-suggestion">
-              <div lang={language}><Alternative text={evaluation.alternative} changed={evaluation.changedWords} /></div>
+              <div lang={language}><Alternative text={evaluation.alternative} changed={evaluation.changedWords} language={language} /></div>
               <PlayButton label="Hear the better alternative" playing={playing === 'alternative'} onClick={() => props.onPlay('alternative')} />
             </div>
           </section>

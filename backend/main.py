@@ -686,6 +686,15 @@ class ClientEvent(BaseModel):
 class SuggestionsRequest(BaseModel):
     session_id: str
 
+
+class EvaluateRequest(BaseModel):
+    session_id: str
+    transcript: str
+
+
+class HintsRequest(BaseModel):
+    session_id: str
+
 # ============ Session Management ============
 
 @app.post("/api/session/start")
@@ -893,6 +902,197 @@ async def get_reply_suggestions(data: SuggestionsRequest):
         if text:
             suggestions.append({"text": text, "english": english})
     return {"suggestions": suggestions[:3]}
+
+
+# ============ Conversation screen: judging an answer, and hints ============
+
+EVALUATION_LEVELS = ("excellent", "good", "almost", "retry")
+
+# A phrase to buy time ("I need a moment"), in each target language. Fixed on purpose:
+# it is instant, free and always correct, and it is shown next to a model-written answer.
+STALL_PHRASES = {
+    "en": ["Give me a moment to think."],
+    "es": ["Un momento, déjame pensar."],
+    "fr": ["Un instant, je réfléchis."],
+    "de": ["Einen Moment, ich überlege kurz."],
+    "nl": ["Een moment, ik denk even na."],
+    "it": ["Un attimo, ci devo pensare."],
+    "pt": ["Um momento, deixa eu pensar."],
+    "hi": ["एक मिनट, मुझे सोचने दीजिए।"],
+    "zh": ["请等一下，我想想。"],
+    "ja": ["ちょっと考えさせてください。"],
+    "ko": ["잠깐만요, 생각 좀 해볼게요."],
+}
+
+_WORD_RE = re.compile(r"[\w'’-]+", re.UNICODE)
+
+
+NO_SPACE_LANGUAGES = {"zh", "ja"}  # no spaces between words: compare character by character
+
+
+def _words(text: str, by_char: bool = False) -> list:
+    if by_char:
+        return [c for c in (text or "") if c.strip() and not re.match(r"[\s。、，．,.!?！？；;：:「」『』（）()\"']", c)]
+    return _WORD_RE.findall(text or "")
+
+
+def _norm_words(text: str, by_char: bool = False) -> list:
+    return [w.lower() for w in _words(text, by_char)]
+
+
+def changed_words_between(original: str, alternative: str, by_char: bool = False) -> list:
+    """Words of `alternative` that are new or different compared with `original`.
+    Done here with a plain diff (not by the model), so the bold words always match the text."""
+    import difflib
+
+    orig = _norm_words(original, by_char)
+    alt_display = _words(alternative, by_char)
+    alt = [w.lower() for w in alt_display]
+    changed = []
+    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(a=orig, b=alt, autojunk=False).get_opcodes():
+        if tag in ("replace", "insert"):
+            changed.extend(alt_display[j1:j2])
+    return changed
+
+
+def clean_evaluation(parsed: dict, transcript: str, language: str = "en") -> dict:
+    """Make the model's judgement safe to show: a known level, and consistent with the alternative."""
+    level = str(parsed.get("level", "")).strip().lower()
+    if level not in EVALUATION_LEVELS:
+        level = "good"
+    alternative = parsed.get("alternative")
+    alternative = alternative.strip() if isinstance(alternative, str) else ""
+
+    by_char = language in NO_SPACE_LANGUAGES
+    if level in ("excellent", "retry"):
+        alternative = ""
+    elif not alternative or _norm_words(alternative, by_char) == _norm_words(transcript, by_char):
+        # Nothing to change after all: it was fine as said.
+        level, alternative = "excellent", ""
+
+    return {
+        "level": level,
+        "alternative": alternative or None,
+        "changed_words": changed_words_between(transcript, alternative, by_char) if alternative else [],
+    }
+
+
+@app.post("/api/conversation/evaluate")
+async def evaluate_answer(data: EvaluateRequest):
+    """
+    Judge what the learner just said, for the conversation screen.
+    Returns {level, alternative, changed_words}. `alternative` is a minimal edit of the
+    learner's own sentence, never a rewrite. Always answers 200: if the model fails the
+    answer counts as "good" with nothing to change, so the conversation keeps moving.
+    """
+    transcript = (data.transcript or "").strip()
+    fallback = {"level": "good", "alternative": None, "changed_words": []}
+    if not transcript:
+        return {"level": "retry", "alternative": None, "changed_words": []}
+
+    session = sessions.get(data.session_id)
+    if not session:
+        return fallback
+
+    messages = session.get("messages", [])
+    last_ai = next((m["content"] for m in reversed(messages) if m.get("role") == "assistant"), "")
+    target_language = session.get("target_language", "en")
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are a kind {target_name} tutor judging ONE spoken answer from a learner.\n"
+                        "The text you get was produced by speech recognition: ignore punctuation, capital letters "
+                        "and spelling that merely sounds the same. Do not blame the learner for recognition errors.\n\n"
+                        "Choose a level:\n"
+                        '- "excellent": correct and natural. Nothing to change.\n'
+                        '- "good": understandable and mostly right; one small improvement is possible.\n'
+                        '- "almost": the meaning is clear, but there are real mistakes.\n'
+                        f'- "retry": cannot be understood, is not an answer to the question, is mostly not in {target_name}, '
+                        "or is cut off so much that it means nothing.\n\n"
+                        'For "good" and "almost" give "alternative": the learner\'s OWN sentence with the smallest edits '
+                        "that make it correct and natural. Keep their meaning, their words and their word order wherever "
+                        "possible. Do not rewrite it, do not make it fancier, do not add new ideas. "
+                        "Avoid wording that reveals the speaker's gender.\n"
+                        'For "excellent" and "retry" the alternative is null.\n'
+                        f'The alternative is in {target_name} only.\n'
+                        'Return JSON only: {"level": "...", "alternative": "..." or null}'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"The {target_name} speaker (AI) said: {last_ai}\nThe learner answered: {transcript}",
+                },
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=160,
+            temperature=0.2,
+        )
+        parsed = json.loads(resp.choices[0].message.content or "{}")
+    except Exception as e:
+        print(f"[EVALUATE] failed: {e}")
+        return fallback
+
+    result = clean_evaluation(parsed, transcript, target_language)
+    print(f"[EVALUATE] lang={target_language} level={result['level']} transcript={transcript!r}")
+    return result
+
+
+@app.post("/api/conversation/hints")
+async def conversation_hints(data: HintsRequest):
+    """
+    Two things the learner could say when they are stuck: a natural answer to the AI's last
+    line, and a phrase for buying time. Called as soon as the AI has spoken, so it is ready
+    before the learner needs it. Always answers 200 (the stall phrase works even if the model fails).
+    """
+    session = sessions.get(data.session_id)
+    if not session:
+        return {"answer": "", "stall": ""}
+
+    target_language = session.get("target_language", "en")
+    target_name = LANGUAGE_NAMES.get(target_language, "the target language")
+    stall = random.choice(STALL_PHRASES.get(target_language, STALL_PHRASES["en"]))
+
+    messages = session.get("messages", [])
+    if not any(m.get("role") == "assistant" for m in messages):
+        return {"answer": "", "stall": stall}
+    recent = "\n".join(
+        f"{'AI' if m.get('role') == 'assistant' else 'Learner'}: {m.get('content', '')}"
+        for m in messages[-4:]
+    )
+
+    answer = ""
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You help a beginner who is practising {target_name} by speaking.\n"
+                        "Give ONE natural reply the learner could say to the AI's last message.\n"
+                        f"- {target_name} only, spoken style, at most 8 words, simple enough for a beginner.\n"
+                        "- Avoid words that reveal the speaker's gender.\n"
+                        'Return JSON only: {"answer": "..."}'
+                    ),
+                },
+                {"role": "user", "content": recent},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=60,
+            temperature=0.7,
+        )
+        parsed = json.loads(resp.choices[0].message.content or "{}")
+        answer = str(parsed.get("answer", "")).strip()
+    except Exception as e:
+        print(f"[HINTS] failed: {e}")
+
+    return {"answer": answer, "stall": stall}
 
 # ============ Sentence Matching and Improvement ============
 

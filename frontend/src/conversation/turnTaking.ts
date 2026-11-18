@@ -95,6 +95,18 @@ export class TurnTaker {
     this.voicedSince = null
   }
 
+  /**
+   * What sounded like speech was only steady noise: forget it and go back to waiting for
+   * real speech. The mic stays open and its clock keeps running.
+   */
+  cancelSpeech(): void {
+    this.speechStarted = false
+    this.speechStartedAt = 0
+    this.voicedSince = null
+    this.lastVoicedAt = null
+    this.partial = null
+  }
+
   /** The latest partial transcript of this turn, if any (null clears it). */
   setPartialTranscript(text: string | null): void {
     this.partial = text

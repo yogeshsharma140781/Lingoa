@@ -57,6 +57,24 @@ describe('waiting, hints and resting', () => {
   })
 })
 
+describe('speech that turns out to be noise, and turns with nothing in them', () => {
+  it('cancelled speech goes back to listening', () => {
+    expect(run({ name: 'userSpeaking' }, { type: 'SPEECH_CANCELLED' }).name).toBe('userListening')
+  })
+
+  it('a discarded turn goes back to listening instead of showing feedback', () => {
+    expect(run({ name: 'processing' }, { type: 'TURN_DISCARDED' }).name).toBe('userListening')
+  })
+
+  it('both are ignored anywhere else', () => {
+    const idle: ConversationState = { name: 'userListening' }
+    expect(transition(idle, { type: 'SPEECH_CANCELLED' })).toBe(idle)
+    expect(transition(idle, { type: 'TURN_DISCARDED' })).toBe(idle)
+    const speaking: ConversationState = { name: 'userSpeaking' }
+    expect(transition(speaking, { type: 'TURN_DISCARDED' })).toBe(speaking)
+  })
+})
+
 describe('retry feedback', () => {
   const retry: ConversationState = { name: 'feedback', level: 'retry' }
 
