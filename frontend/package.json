@@ -10,7 +10,8 @@
     "cap:ios": "npx cap sync ios && npx cap open ios",
     "cap:sync": "npm run build && npx cap sync",
     "cap:copy": "npx cap copy",
-    "cap:update": "npx cap update"
+    "cap:update": "npx cap update",
+    "test": "vitest run"
   },
   "dependencies": {
     "@capacitor/app": "^7.1.1",
@@ -20,6 +21,8 @@
     "@capacitor/local-notifications": "^7.0.7",
     "@capacitor/preferences": "^7.0.3",
     "@capacitor/status-bar": "^7.0.4",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/source-serif-4": "^5.3.1",
     "framer-motion": "^11.0.3",
     "lucide-react": "^0.321.0",
     "react": "^18.2.0",
@@ -34,6 +37,7 @@
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
-    "vite": "^5.1.0"
+    "vite": "^5.1.0",
+    "vitest": "^2.1.9"
   }
 }
