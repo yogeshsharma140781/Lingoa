@@ -1,0 +1,338 @@
+/* Conversation screen: pure white, light appearance, greys and black.
+   Sizes are in em so they follow the root font size. On iOS, `font: -apple-system-body`
+   makes that base size follow Dynamic Type; the two big serif lines are capped. */
+
+.conv-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  color: #111111;
+  color-scheme: light;
+  font-family: 'Inter Variable', Inter, -apple-system, system-ui, sans-serif;
+  /* Body text scales with the reader's text size. In a plain browser (no Dynamic Type),
+     --conv-scale stands in for it (the gallery's text-size slider sets it). */
+  font-size: calc(1rem * var(--conv-scale, 1));
+  -webkit-font-smoothing: antialiased;
+}
+@supports (font: -apple-system-body) {
+  .conv-root {
+    font: -apple-system-body; /* iOS: follows Dynamic Type */
+    font-family: 'Inter Variable', Inter, -apple-system, system-ui, sans-serif;
+  }
+}
+
+.conv-serif {
+  font-family: 'Source Serif 4 Variable', 'Source Serif 4', 'New York', Georgia, serif;
+}
+
+/* ---- header (same in every state) ---- */
+.conv-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px 0;
+  flex-shrink: 0;
+}
+.conv-title {
+  text-align: center;
+  font-size: 0.8125em;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #ebebeb;
+  color: #1a1a1a;
+  cursor: pointer;
+}
+
+/* ---- avatar ---- */
+.conv-avatar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 20px;
+  flex-shrink: 0;
+}
+.conv-avatar {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 50%;
+}
+.conv-avatar[data-tappable='true'] { cursor: pointer; }
+.conv-avatar-ring { position: absolute; inset: 0; }
+.conv-avatar-inner {
+  position: absolute;
+  inset: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f3f3f3;
+  color: #111;
+  overflow: hidden;
+}
+.conv-avatar-name { font-size: 1.375em; line-height: 1; }
+.conv-avatar-label {
+  margin-top: 12px;
+  min-height: 1.2em; /* reserved so nothing moves when the label changes */
+  font-size: 0.75em;
+  line-height: 1.2;
+  color: #262626;
+  text-align: center;
+}
+
+/* ---- AI line (fixed place in every state) ---- */
+.conv-ai {
+  flex-shrink: 0;
+  padding: 18px 28px 0;
+  text-align: center;
+}
+.conv-ai-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  /* room for three lines, so a longer line does not push anything */
+  min-height: calc(3 * 1.18 * var(--conv-large));
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.18;
+  font-size: var(--conv-large);
+  color: #111111;
+  transition: color 160ms ease;
+}
+.conv-ai-line[data-dimmed='true'] { color: #8a8a8a; } /* 3.4:1 on white: large text */
+.conv-root { --conv-large: min(2.125em, 38px); } /* the big serif lines: scale a little, then stop */
+
+.conv-actions {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.conv-pill-hit {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.conv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: #f2f2f2;
+  color: #2b2b2b;
+  font-size: 0.75em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.conv-pill[data-on='true'] { background: #e2e2e2; }
+
+/* reserved so showing the English line never moves the lower half */
+.conv-translation {
+  min-height: 3.2em;
+  padding: 2px 4px 0;
+  font-size: 0.9375em;
+  line-height: 1.35;
+  color: #404040;
+}
+
+/* ---- lower half: the learner ---- */
+.conv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+.conv-lower {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  padding: 0 20px 16px;
+}
+.conv-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.conv-caption { font-size: 0.75em; color: #262626; text-align: center; }
+
+.conv-waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 52px;
+}
+.conv-waveform i {
+  display: block;
+  width: 4px;
+  border-radius: 2px;
+  background: #111;
+  transition: height 90ms linear;
+}
+.conv-dots { display: flex; gap: 6px; height: 52px; align-items: center; }
+.conv-dots i { width: 5px; height: 5px; border-radius: 50%; background: #111; }
+
+.conv-hint-btn {
+  margin-top: 22px;
+  min-height: 44px;
+  padding: 0 22px;
+  border: 1px solid #c9c9c9;
+  border-radius: 22px;
+  background: #fff;
+  color: #1a1a1a;
+  font: inherit;
+  font-size: 0.875em;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.conv-card {
+  width: 100%;
+  margin-top: 22px;
+  padding: 14px 14px 8px 16px;
+  border: 1px solid #d4d4d4;
+  border-radius: 12px;
+  background: #fff;
+}
+.conv-card-title { margin: 0 0 6px; font-size: 0.75em; color: #404040; }
+.conv-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 52px;
+}
+.conv-suggestion p { margin: 0; font-size: 1.125em; line-height: 1.25; color: #333; text-align: left; }
+.conv-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #f0f0f0;
+  color: #222;
+  cursor: pointer;
+}
+.conv-play[data-playing='true'] { background: #d9d9d9; }
+
+/* ---- feedback ---- */
+.conv-said-label { margin-top: 18px; font-size: 0.75em; letter-spacing: 0.06em; color: #262626; text-align: center; }
+.conv-said {
+  margin: 8px 0 0;
+  font-size: min(1.8em, 32px);
+  line-height: 1.2;
+  text-align: center;
+  color: #111;
+}
+.conv-alt { margin-top: 22px; }
+.conv-alt .conv-card-title { color: #262626; }
+.conv-alt-text { margin: 0; font-size: 1.0625em; line-height: 1.3; color: #333; text-align: left; }
+.conv-alt-text b { font-weight: 700; color: #000; }
+
+.conv-footer {
+  flex-shrink: 0;
+  width: 100%;
+  padding: 8px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.conv-primary {
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: 25px;
+  background: #4d4d4d;
+  color: #fff;
+  font: inherit;
+  font-size: 1em;
+  font-weight: 500;
+  cursor: pointer;
+}
+.conv-text-btn {
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  background: transparent;
+  color: #333;
+  font: inherit;
+  font-size: 0.9375em;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- processing ---- */
+.conv-processing { display: flex; gap: 8px; height: 52px; align-items: center; }
+.conv-processing i {
+  width: 8px; height: 8px; border-radius: 50%; background: #111;
+  animation: conv-bounce 1s infinite ease-in-out;
+}
+.conv-processing i:nth-child(2) { animation-delay: 0.15s; }
+.conv-processing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes conv-bounce { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+/* ---- transcript sheet ---- */
+.conv-sheet-scrim { position: absolute; inset: 0; z-index: 30; background: rgba(0, 0, 0, 0.3); }
+.conv-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 31;
+  max-height: 70%; display: flex; flex-direction: column;
+  border-radius: 20px 20px 0 0; background: #fff; box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.15);
+}
+.conv-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 0 20px; }
+.conv-sheet-body { overflow-y: auto; padding: 4px 20px 24px; }
+.conv-msg { margin: 0 0 14px; }
+.conv-msg small { display: block; margin-bottom: 2px; font-size: 0.75em; color: #404040; }
+.conv-msg p { margin: 0; font-size: 1em; line-height: 1.35; color: #111; }
+
+/* ---- debug overlay (dev only) ---- */
+.conv-debug {
+  position: absolute; left: 50%; top: 4px; transform: translateX(-50%); z-index: 40;
+  padding: 3px 8px; border-radius: 8px; background: rgba(0, 0, 0, 0.78); color: #9be29b;
+  font: 10px/1.3 ui-monospace, Menlo, monospace; pointer-events: none; white-space: pre;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conv-processing i { animation: none; opacity: 0.7; }
+  .conv-waveform i { transition: none; }
+  .conv-ai-line { transition: none; }
+}
+
+:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }

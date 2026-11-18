@@ -5,6 +5,11 @@ import App from './App'
 import { loadAppInfo } from './appInfo'
 import './index.css'
 
+// Dev only: open /?conversation-gallery to see every conversation state with mock data.
+const Gallery = import.meta.env.DEV && new URLSearchParams(window.location.search).has('conversation-gallery')
+  ? React.lazy(() => import('./conversation/ui/Gallery'))
+  : null
+
 // Tag <html> so index.css can tell the native iOS app (real WKWebView notch/home-
 // indicator concerns) apart from a plain browser (no notch, env() is reliably 0 -
 // or, in mobile Safari, reliably correct on its own). See index.css for why this
@@ -19,7 +24,13 @@ loadAppInfo()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {Gallery ? (
+      <React.Suspense fallback={null}>
+        <Gallery />
+      </React.Suspense>
+    ) : (
+      <App />
+    )}
   </React.StrictMode>,
 )
 
