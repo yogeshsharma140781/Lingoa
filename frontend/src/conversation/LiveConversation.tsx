@@ -461,11 +461,12 @@ export function LiveConversation() {
   }, [])
 
   // ---- the white screen needs dark status-bar text; put it back on the way out ----
+  // Only while the white screen is showing: the permission and start-up screens before it are dark.
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return
+    if (!started || !Capacitor.isNativePlatform()) return
     StatusBar.setStyle({ style: Style.Light }).catch(() => {})
     return () => { StatusBar.setStyle({ style: Style.Dark }).catch(() => {}) }
-  }, [])
+  }, [started])
 
   // Leaving the screen any way at all: stop the audio and the mic.
   useEffect(() => () => { stopAllAudio() }, [])
