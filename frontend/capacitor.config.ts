@@ -20,7 +20,8 @@ const config: CapacitorConfig = {
   },
   plugins: {
     StatusBar: {
-      style: 'Light',
+      // 'DARK' = light text, for our dark background ('LIGHT' would be dark text).
+      style: 'DARK',
     },
   },
 };

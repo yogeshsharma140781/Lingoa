@@ -1,3 +1,4 @@
+import { Flag } from './Flag'
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Flame, Play, ChevronDown, Check, Mic, Globe, X } from 'lucide-react'
@@ -122,7 +123,7 @@ export function HomeScreen() {
             className="flex items-center gap-3 glass rounded-2xl px-5 py-3 hover:bg-white/5 transition-colors"
           >
             <Globe className="w-5 h-5 text-surface-400" />
-            <span className="text-2xl">{currentLanguage.flag}</span>
+            <Flag code={currentLanguage.code} className="w-8" />
             <span className="font-medium">{currentLanguage.name}</span>
             <ChevronDown className={`w-4 h-4 text-surface-400 transition-transform ${showLanguages ? 'rotate-180' : ''}`} />
           </button>
@@ -140,7 +141,7 @@ export function HomeScreen() {
                   lang.code === targetLanguage ? 'bg-primary-500/20' : ''
                 }`}
               >
-                <span className="text-xl">{lang.flag}</span>
+                <Flag code={lang.code} className="w-7" />
                 <span className="font-medium">{lang.name}</span>
                 {lang.code === targetLanguage && (
                   <Check className="w-4 h-4 text-primary-400 ml-auto" />

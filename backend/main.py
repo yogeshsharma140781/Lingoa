@@ -1088,7 +1088,17 @@ KNOWN_HALLUCINATION_MARKERS = [
     "thanks for watching",
     "subtitles by",
     "subscribe to",
-    "字幕",                  # zh / ja
+    # "Like, subscribe, ring the bell" outros: what Whisper invents from poor-quality audio.
+    "like and subscribe",
+    "suscríbete",           # es
+    "suscribete",
+    "campanita",
+    "abonnez-vous",         # fr
+    "abonniert",            # de
+    "kanal abonnieren",
+    "iscriviti al canale",  # it
+    "inscreva-se",          # pt
+    "字幕",                # zh / ja
     "请不吝点赞",
     "ご視聴ありがとうございました",
     "시청해 주셔서 감사합니다",
