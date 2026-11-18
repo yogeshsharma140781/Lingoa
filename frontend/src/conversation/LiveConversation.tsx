@@ -600,9 +600,9 @@ export function LiveConversation() {
     if (stateRef.current.name !== 'feedback') return
     send({ type: 'SKIP' })
     setEvaluation(null)
-    // Move on as if they had said "I don't know", so the AI carries on naturally.
-    const said = lastTranscriptRef.current || SKIP_UTTERANCES[language] || SKIP_UTTERANCES.en
-    useStore.getState().addMessage('user', said)
+    // Move on as if they had said "I don't know", so the AI carries on naturally. (This is only
+    // sent to the AI; it is not added to the on-screen transcript, because they did not say it.)
+    const said = SKIP_UTTERANCES[language] || SKIP_UTTERANCES.en
     replyRef.current = {
       promise: apiRef.current.getAiResponse(said, null, { withVoice: true }),
       startedAt: performance.now(),

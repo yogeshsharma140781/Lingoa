@@ -92,9 +92,16 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       streamRef.current.getTracks().forEach(track => track.stop())
     }
     if (audioContextRef.current) {
-      await audioContextRef.current.close()
+      // It may already be closed (iOS can close it itself after an interruption); closing twice throws,
+      // and that must not stop the microphone from opening again.
+      try {
+        if (audioContextRef.current.state !== 'closed') await audioContextRef.current.close()
+      } catch {
+        // ignore
+      }
+      audioContextRef.current = null
     }
-    
+
     // Reset chunks
     chunksRef.current = []
     

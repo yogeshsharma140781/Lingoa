@@ -2,6 +2,21 @@
    Sizes are in em so they follow the root font size. On iOS, `font: -apple-system-body`
    makes that base size follow Dynamic Type; the two big serif lines are capped. */
 
+.conv-root,
+.conv-sheet {
+  color: #111111;
+  color-scheme: light;
+  font-family: 'Inter Variable', Inter, -apple-system, system-ui, sans-serif;
+  font-size: calc(1rem * var(--conv-scale, 1));
+  -webkit-font-smoothing: antialiased;
+}
+@supports (font: -apple-system-body) {
+  .conv-sheet {
+    font: -apple-system-body;
+    font-family: 'Inter Variable', Inter, -apple-system, system-ui, sans-serif;
+  }
+}
+
 .conv-root {
   position: relative;
   display: flex;
