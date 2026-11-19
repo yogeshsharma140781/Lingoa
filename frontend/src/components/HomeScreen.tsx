@@ -2,7 +2,7 @@ import { Flag } from './Flag'
 import logo from '../assets/logo.svg'
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Flame, Play, ChevronDown, Check, Globe, X } from 'lucide-react'
+import { Flame, Play, ChevronDown, Check, X } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
 import { unlockAudio, useApi } from '../hooks/useApi'
 import { NotificationPrompt } from './NotificationPrompt'
@@ -122,7 +122,6 @@ export function HomeScreen() {
             className="lt-card flex items-center gap-3 px-5 min-h-[52px]"
             aria-expanded={showLanguages}
           >
-            <Globe className="w-5 h-5 text-[#555555]" />
             <Flag code={currentLanguage.code} className="w-8" />
             <span className="font-medium">{currentLanguage.name}</span>
             <ChevronDown className={`w-4 h-4 text-[#555555] transition-transform ${showLanguages ? 'rotate-180' : ''}`} />
