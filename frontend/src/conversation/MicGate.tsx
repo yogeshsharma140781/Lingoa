@@ -1,6 +1,5 @@
 // The screens that come before the conversation: asking for the microphone, being refused,
-// starting up, and a failed start. They keep the app's dark look; the white conversation
-// screen only begins once the AI is ready to speak.
+// starting up, and a failed start. White, like the rest of the app.
 
 import { Loader2, Mic, MicOff } from 'lucide-react'
 import type { MicPermissionState } from './useMicPermission'
@@ -18,21 +17,26 @@ interface MicGateProps {
 export function MicGate({ permission, isNativeIos, startError, onRequest, onOpenSettings, onRetryStart, onGoBack }: MicGateProps) {
   if (permission === 'checking') {
     return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-primary-400 animate-spin" />
+      <div className="h-full flex items-center justify-center bg-white">
+        <Loader2 className="w-8 h-8 text-[#555555] animate-spin" />
       </div>
     )
   }
 
   if (permission === 'prompt' || permission === 'requesting') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 text-white">
-        <div className="w-32 h-32 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center glow-primary mb-8">
-          <Mic className="w-16 h-16 text-white" />
+      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 bg-white text-[#111111]">
+        <div className="relative w-32 h-32 mb-8">
+          <svg viewBox="0 0 120 120" className="absolute inset-0" aria-hidden="true">
+            <circle cx="60" cy="60" r="57" fill="none" stroke="#c4c4c4" strokeWidth="4" strokeLinecap="round" strokeDasharray="7 6" />
+          </svg>
+          <div className="absolute inset-[10px] rounded-full bg-[#f3f3f3] flex items-center justify-center">
+            <Mic className="w-12 h-12 text-[#262626]" strokeWidth={1.5} />
+          </div>
         </div>
         <div className="text-center mb-8">
-          <h2 className="font-display text-3xl font-bold mb-4">Microphone Access Required</h2>
-          <p className="text-surface-400 text-lg max-w-xs mx-auto">
+          <h2 className="font-display text-3xl font-semibold mb-4 tracking-tight">Microphone access needed</h2>
+          <p className="lt-muted text-lg max-w-xs mx-auto leading-snug">
             Lingoa needs microphone access to record your voice for language practice conversations. Your audio is only used during the conversation and is not stored permanently.
           </p>
         </div>
@@ -40,7 +44,7 @@ export function MicGate({ permission, isNativeIos, startError, onRequest, onOpen
           <button
             onClick={onRequest}
             disabled={permission === 'requesting'}
-            className="w-full btn-primary rounded-2xl py-4 flex items-center justify-center gap-3 font-semibold text-lg text-white disabled:opacity-50"
+            className="lt-primary"
           >
             {permission === 'requesting' ? (
               <>
@@ -61,12 +65,12 @@ export function MicGate({ permission, isNativeIos, startError, onRequest, onOpen
 
   if (permission === 'denied') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 text-white">
-        <div className="w-24 h-24 rounded-full bg-red-500/20 flex items-center justify-center mb-6">
-          <MicOff className="w-12 h-12 text-red-400" />
+      <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 bg-white text-[#111111]">
+        <div className="w-24 h-24 rounded-full bg-[#f3f3f3] flex items-center justify-center mb-6">
+          <MicOff className="w-10 h-10 text-[#262626]" strokeWidth={1.5} />
         </div>
-        <h2 className="text-2xl font-semibold mb-3">Microphone Access Required</h2>
-        <p className="text-surface-400 text-center mb-8 max-w-xs">
+        <h2 className="font-display text-2xl font-semibold mb-3">Microphone access needed</h2>
+        <p className="lt-muted text-center mb-8 max-w-xs">
           {isNativeIos
             ? 'Microphone access is turned off for Lingoa. Enable it in iPhone Settings to continue.'
             : 'Please allow microphone access to use speaking practice.'}
@@ -74,12 +78,12 @@ export function MicGate({ permission, isNativeIos, startError, onRequest, onOpen
         <div className="space-y-3 w-full max-w-xs">
           <button
             onClick={isNativeIos ? onOpenSettings : onRequest}
-            className="w-full btn-primary rounded-2xl py-4 font-semibold text-white flex items-center justify-center gap-2"
+            className="lt-primary"
           >
             <Mic className="w-5 h-5" />
             {isNativeIos ? 'Open Settings' : 'Enable Microphone'}
           </button>
-          <button onClick={onGoBack} className="w-full glass rounded-2xl py-3 font-medium text-surface-400 hover:bg-white/10 transition-colors">
+          <button onClick={onGoBack} className="lt-secondary">
             Go Back
           </button>
         </div>
@@ -90,15 +94,15 @@ export function MicGate({ permission, isNativeIos, startError, onRequest, onOpen
   // Permission granted, but the conversation has not started yet.
   if (startError) {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 text-white">
+      <div className="h-full flex flex-col items-center justify-center p-6 bg-white text-[#111111]">
         <div className="text-center max-w-xs">
-          <h2 className="text-2xl font-semibold mb-3 text-red-400">Error</h2>
-          <p className="text-surface-400 mb-6">{startError}</p>
+          <h2 className="font-display text-2xl font-semibold mb-3">Something went wrong</h2>
+          <p className="lt-muted mb-6">{startError}</p>
           <div className="space-y-3">
-            <button onClick={onRetryStart} className="w-full btn-primary rounded-2xl py-3 font-semibold text-white">
+            <button onClick={onRetryStart} className="lt-primary">
               Try Again
             </button>
-            <button onClick={onGoBack} className="w-full glass rounded-2xl py-3 font-medium text-surface-400 hover:bg-white/10 transition-colors">
+            <button onClick={onGoBack} className="lt-secondary">
               Go Back
             </button>
           </div>
@@ -108,10 +112,10 @@ export function MicGate({ permission, isNativeIos, startError, onRequest, onOpen
   }
 
   return (
-    <div className="h-full flex items-center justify-center text-white">
+    <div className="h-full flex items-center justify-center bg-white text-[#111111]">
       <div className="text-center">
-        <Loader2 className="w-8 h-8 text-primary-400 animate-spin mx-auto mb-4" />
-        <p className="text-surface-400">Starting conversation...</p>
+        <Loader2 className="w-8 h-8 text-[#555555] animate-spin mx-auto mb-4" />
+        <p className="lt-muted">Starting conversation...</p>
       </div>
     </div>
   )

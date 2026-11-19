@@ -47,8 +47,8 @@ export default {
         }
       },
       fontFamily: {
-        sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
-        display: ['Fraunces', 'serif'],
+        sans: ['Inter Variable', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['Source Serif 4 Variable', 'Source Serif 4', 'Georgia', 'serif'],
       },
       animation: {
         'pulse-slow': 'pulse 3s ease-in-out infinite',

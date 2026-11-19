@@ -74,12 +74,7 @@ export default function App() {
   }, [logEvent])
 
   return (
-    <div className="h-full w-full animated-gradient overflow-hidden relative">
-      {/* Decorative background shapes */}
-      <div className="floating-shape w-96 h-96 bg-primary-500 top-[-10%] left-[-10%] animate-float" />
-      <div className="floating-shape w-80 h-80 bg-accent-500 bottom-[-15%] right-[-10%] animate-float" style={{ animationDelay: '-3s' }} />
-      <div className="floating-shape w-64 h-64 bg-primary-600 top-[40%] right-[-20%] animate-float" style={{ animationDelay: '-6s' }} />
-      
+    <div className="h-full w-full bg-white text-[#111111] overflow-hidden relative">
       {/* Main content. The wrapper keeps screens clear of the notch / home indicator
           while the gradient behind it still runs edge to edge. */}
       <div className="h-full w-full safe-area">
@@ -89,7 +84,9 @@ export default function App() {
         {currentScreen === 'topics' && <TopicSelectionScreen key="topics" />}
         {currentScreen === 'roleplay' && <RoleplaySelectionScreen key="roleplay" />}
         {currentScreen === 'custom-roleplay' && <CustomRoleplayScreen key="custom-roleplay" />}
-        {currentScreen === 'conversation' && (useLegacyConversation ? <ConversationScreen key="conversation" /> : <LiveConversation key="conversation" />)}
+        {currentScreen === 'conversation' && (useLegacyConversation
+          ? <div key="conversation" className="h-full w-full animated-gradient text-white"><ConversationScreen /></div>
+          : <LiveConversation key="conversation" />)}
         {currentScreen === 'completion' && <CompletionScreen key="completion" />}
         {currentScreen === 'improvements' && <ImprovementsScreen key="improvements" />}
       </AnimatePresence>

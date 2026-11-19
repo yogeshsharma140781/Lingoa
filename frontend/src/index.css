@@ -41,9 +41,9 @@ html, body, #root {
 }
 
 body {
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  background: linear-gradient(145deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
-  color: #fafafa;
+  font-family: 'Inter Variable', Inter, -apple-system, system-ui, sans-serif;
+  background: #ffffff;
+  color: #111111;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
@@ -65,12 +65,12 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #44403c;
+  background: #d4d4d4;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #57534e;
+  background: #bdbdbd;
 }
 
 /* Glow effects */
@@ -175,3 +175,45 @@ html {
 }
 
 
+
+/* ---- Light theme: the white look shared by every screen (same greys as the conversation screen) ---- */
+.lt-back {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border: 0; border-radius: 50%;
+  background: #ebebeb; color: #1a1a1a; cursor: pointer;
+}
+.lt-card {
+  background: #ffffff; border: 1px solid #d4d4d4; border-radius: 16px;
+  color: #111111; transition: background-color 120ms ease;
+}
+button.lt-card:active, a.lt-card:active { background: #f2f2f2; }
+.lt-tile {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 44px; height: 44px; border-radius: 12px; background: #f2f2f2; color: #333333;
+}
+.lt-primary {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; min-height: 56px; padding: 0 24px; border: 0; border-radius: 28px;
+  background: #4d4d4d; color: #ffffff; font-size: 1.0625rem; font-weight: 500; cursor: pointer;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+.lt-primary:active { background: #333333; }
+.lt-primary:disabled { background: #c4c4c4; color: #ffffff; cursor: not-allowed; } /* not opacity: motion buttons set their own */
+.lt-secondary {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 50px; padding: 0 24px; border: 1px solid #c9c9c9; border-radius: 28px;
+  background: #ffffff; color: #1a1a1a; font-size: 1rem; font-weight: 500; cursor: pointer;
+}
+.lt-secondary:active { background: #f2f2f2; }
+.lt-pill {
+  display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
+  background: #f2f2f2; color: #262626;
+}
+.lt-text-btn {
+  min-height: 44px; padding: 0 12px; border: 0; background: transparent;
+  color: #333333; font-size: 0.9375rem; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.lt-muted { color: #404040; }
+.lt-faint { color: #6b6b6b; }
+.lt-divider { border-color: #e2e2e2; }
+:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }

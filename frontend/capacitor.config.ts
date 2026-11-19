@@ -15,13 +15,14 @@ const config: CapacitorConfig = {
     // for the notch and home indicator (env(safe-area-inset-*) in index.css), so
     // 'automatic' made iOS add the same margin a second time (black bars + empty band).
     contentInset: 'never',
-    backgroundColor: '#1c1917',
+    backgroundColor: '#ffffff',
     scrollEnabled: true,
   },
   plugins: {
     StatusBar: {
-      // 'DARK' = light text, for our dark background ('LIGHT' would be dark text).
-      style: 'DARK',
+      // The whole app is white now, so the status bar needs dark text:
+      // 'LIGHT' = dark text ('DARK' would be light text for a dark background).
+      style: 'LIGHT',
     },
   },
 };

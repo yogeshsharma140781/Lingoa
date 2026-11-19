@@ -16,7 +16,7 @@ export function CompletionScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center justify-between p-6 relative z-10"
+      className="h-full flex flex-col items-center justify-between p-6 relative z-10 bg-white text-[#111111]"
     >
       {/* Celebration animation */}
       <div className="flex-1 flex flex-col items-center justify-center">
@@ -25,13 +25,19 @@ export function CompletionScreen() {
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', delay: 0.2 }}
-          className={`w-32 h-32 rounded-full flex items-center justify-center mb-8 ${
-            completedFull 
-              ? 'bg-gradient-to-br from-accent-400 to-accent-600 glow-accent' 
-              : 'bg-gradient-to-br from-primary-400 to-primary-600 glow-primary'
-          }`}
+          className="relative w-32 h-32 mb-8"
         >
-          <Trophy className="w-16 h-16 text-white" />
+          {/* The avatar ring: solid when the daily goal is reached, dashed when it is not yet */}
+          <svg viewBox="0 0 120 120" className="absolute inset-0" aria-hidden="true">
+            <circle
+              cx="60" cy="60" r={completedFull ? 56 : 57} fill="none" stroke="#c4c4c4"
+              strokeWidth={completedFull ? 8 : 4} strokeLinecap="round"
+              strokeDasharray={completedFull ? undefined : '7 6'}
+            />
+          </svg>
+          <div className="absolute inset-[10px] rounded-full bg-[#f3f3f3] flex items-center justify-center">
+            <Trophy className="w-12 h-12 text-[#262626]" strokeWidth={1.5} />
+          </div>
         </motion.div>
 
         {/* Congratulations */}
@@ -43,22 +49,22 @@ export function CompletionScreen() {
         >
           {completedFull ? (
             <>
-              <h1 className="font-display text-4xl font-bold mb-4">
-                Amazing! 🎉
+              <h1 className="font-display text-4xl font-semibold mb-4 tracking-tight">
+                Amazing!
               </h1>
-              <p className="text-surface-300 text-lg mb-2">
+              <p className="lt-muted text-lg mb-2">
                 You spoke for {minutes}:{seconds.toString().padStart(2, '0')} straight!
               </p>
             </>
           ) : (
             <>
-              <h1 className="font-display text-4xl font-bold mb-4">
-                Good effort! 💪
+              <h1 className="font-display text-4xl font-semibold mb-4 tracking-tight">
+                Good effort!
               </h1>
-              <p className="text-surface-300 text-lg mb-2">
+              <p className="lt-muted text-lg mb-2">
                 You spoke for {minutes}:{seconds.toString().padStart(2, '0')}
               </p>
-              <p className="text-surface-500 text-sm">
+              <p className="lt-faint text-sm">
                 Complete {targetMinutesLabel} to mark your daily goal
               </p>
             </>
@@ -71,12 +77,12 @@ export function CompletionScreen() {
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.6 }}
-            className="flex items-center gap-3 glass rounded-2xl px-6 py-4 mt-8"
+            className="flex items-center gap-3 lt-card px-6 py-4 mt-8"
           >
-            <Flame className="w-8 h-8 text-primary-400" />
+            <Flame className="w-8 h-8" strokeWidth={1.5} />
             <div>
-              <div className="text-3xl font-bold">{streak}</div>
-              <div className="text-surface-400 text-sm">day streak!</div>
+              <div className="text-3xl font-semibold">{streak}</div>
+              <div className="lt-muted text-sm">day streak</div>
             </div>
           </motion.div>
         )}
@@ -88,17 +94,17 @@ export function CompletionScreen() {
           transition={{ delay: 0.8 }}
           className="grid grid-cols-2 gap-4 mt-8"
         >
-          <div className="glass rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-primary-400">
+          <div className="lt-card !rounded-xl p-4 text-center">
+            <div className="text-2xl font-semibold">
               {minutes}:{seconds.toString().padStart(2, '0')}
             </div>
-            <div className="text-surface-500 text-sm">Speaking time</div>
+            <div className="lt-faint text-sm">Speaking time</div>
           </div>
-          <div className="glass rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-accent-400">
-              {Math.round((speakingTime / targetTime) * 100)}%
+          <div className="lt-card !rounded-xl p-4 text-center">
+            <div className="text-2xl font-semibold">
+              {Math.min(100, Math.round((speakingTime / targetTime) * 100))}%
             </div>
-            <div className="text-surface-500 text-sm">Completed</div>
+            <div className="lt-faint text-sm">Completed</div>
           </div>
         </motion.div>
       </div>
@@ -108,13 +114,13 @@ export function CompletionScreen() {
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 1 }}
-        className="w-full space-y-3 pb-8"
+        className="w-full space-y-3 pb-4"
       >
         <button
           onClick={() => setScreen('improvements')}
-          className="w-full btn-primary rounded-2xl py-5 flex items-center justify-center gap-3 font-semibold text-lg text-white"
+          className="lt-primary"
         >
-          See What You Can Improve
+          See what you can improve
           <ArrowRight className="w-5 h-5" />
         </button>
         
@@ -123,10 +129,10 @@ export function CompletionScreen() {
             useStore.getState().resetSession()
             setScreen('home')
           }}
-          className="w-full glass rounded-2xl py-4 flex items-center justify-center gap-2 font-medium text-surface-300 hover:bg-white/10 transition-colors"
+          className="lt-secondary"
         >
           <Home className="w-5 h-5" />
-          Back to Home
+          Back to home
         </button>
       </motion.div>
     </motion.div>

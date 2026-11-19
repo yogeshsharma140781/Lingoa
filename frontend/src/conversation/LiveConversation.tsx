@@ -11,7 +11,6 @@
 // feedback on screen (next AI reply is fetched in the background) -> Continue -> AI speaks.
 
 import { Capacitor } from '@capacitor/core'
-import { StatusBar, Style } from '@capacitor/status-bar'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { API_BASE, stopAllAudio, unlockAudio, useApi } from '../hooks/useApi'
 import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
@@ -459,14 +458,6 @@ export function LiveConversation() {
       setScenarioTitle(TOPICS.find((t) => t.id === s.selectedTopic)?.name ?? 'Conversation')
     }
   }, [])
-
-  // ---- the white screen needs dark status-bar text; put it back on the way out ----
-  // Only while the white screen is showing: the permission and start-up screens before it are dark.
-  useEffect(() => {
-    if (!started || !Capacitor.isNativePlatform()) return
-    StatusBar.setStyle({ style: Style.Light }).catch(() => {})
-    return () => { StatusBar.setStyle({ style: Style.Dark }).catch(() => {}) }
-  }, [started])
 
   // Leaving the screen any way at all: stop the audio and the mic.
   useEffect(() => () => { stopAllAudio() }, [])

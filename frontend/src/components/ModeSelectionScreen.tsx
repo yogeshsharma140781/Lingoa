@@ -30,22 +30,23 @@ export function ModeSelectionScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full relative z-10 text-white p-6 flex flex-col overflow-hidden"
+      className="h-full relative z-10 bg-white text-[#111111] p-6 flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center mb-8">
         <button
           onClick={handleBack}
-          className="p-2 hover:bg-surface-800 rounded-full transition-colors"
+          className="lt-back"
+          aria-label="Back"
         >
-          <ArrowLeft className="w-6 h-6" />
+          <ArrowLeft className="w-5 h-5" />
         </button>
       </div>
 
       {/* Title */}
       <div className="text-center mb-8">
-        <h2 className="font-display text-3xl font-bold mb-2">Choose Your Practice</h2>
-        <p className="text-surface-400">Pick how you want to practice</p>
+        <h2 className="font-display text-3xl font-semibold mb-2 tracking-tight">Choose your practice</h2>
+        <p className="lt-muted">Pick how you want to practice</p>
       </div>
 
       {/* Mode Options */}
@@ -56,15 +57,15 @@ export function ModeSelectionScreen() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
           onClick={handleTopics}
-          className="glass rounded-2xl p-6 text-left hover:bg-white/5 transition-colors"
+          className="lt-card p-5 text-left"
         >
           <div className="flex items-start gap-4">
-            <div className="p-3 bg-primary-500/20 rounded-xl">
-              <MessageSquare className="w-6 h-6 text-primary-400" />
+            <div className="lt-tile">
+              <MessageSquare className="w-5 h-5" />
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-lg mb-1">Free Conversation</h3>
-              <p className="text-surface-400 text-sm">
+              <h3 className="font-semibold text-lg mb-1">Free conversation</h3>
+              <p className="lt-muted text-sm">
                 Chat naturally about topics you choose
               </p>
             </div>
@@ -77,15 +78,15 @@ export function ModeSelectionScreen() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
           onClick={handleRoleplay}
-          className="glass rounded-2xl p-6 text-left hover:bg-white/5 transition-colors"
+          className="lt-card p-5 text-left"
         >
           <div className="flex items-start gap-4">
-            <div className="p-3 bg-accent-500/20 rounded-xl">
-              <Users className="w-6 h-6 text-accent-400" />
+            <div className="lt-tile">
+              <Users className="w-5 h-5" />
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-lg mb-1">Role-play</h3>
-              <p className="text-surface-400 text-sm">
+              <p className="lt-muted text-sm">
                 Practice real-life situations like ordering coffee or talking to colleagues
               </p>
             </div>

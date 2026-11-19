@@ -58,36 +58,37 @@ export function RoleplaySelectionScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full relative z-10 text-white p-6 flex flex-col overflow-hidden"
+      className="h-full relative z-10 bg-white text-[#111111] p-6 flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <button
           onClick={handleBack}
-          className="p-2 hover:bg-surface-800 rounded-full transition-colors"
+          className="lt-back"
+          aria-label="Back"
         >
-          <ArrowLeft className="w-6 h-6" />
+          <ArrowLeft className="w-5 h-5" />
         </button>
-        <h2 className="font-display text-xl font-bold">Role-play Scenarios</h2>
-        <div className="w-10" /> {/* Spacer */}
+        <h2 className="font-display text-xl font-semibold">Role-play scenarios</h2>
+        <div className="w-11" /> {/* Spacer */}
       </div>
 
       {/* Scenarios List */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <span className="text-surface-400">Loading scenarios...</span>
+            <span className="lt-faint">Loading scenarios...</span>
           </div>
         ) : (
           <div className="space-y-6 pb-4">
             {categories.map((category, catIndex) => (
               <div key={category.category}>
-                <h3 className="text-surface-400 text-sm font-semibold uppercase tracking-wider mb-3 px-1">
+                <h3 className="lt-faint text-xs font-semibold uppercase tracking-wider mb-3 px-1">
                   {category.category}
                 </h3>
                 <div className="space-y-2">
                   {category.scenarios.map((scenario, scenarioIndex) => {
-                    const index = catIndex * 100 + scenarioIndex
+                    const index = catIndex * 5 + scenarioIndex // staggered entrance; was *100, which delayed later categories by seconds
                     return (
                       <motion.button
                         key={scenario.id}
@@ -95,7 +96,7 @@ export function RoleplaySelectionScreen() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.03 }}
                         onClick={() => handleScenarioSelect(scenario.id)}
-                        className="w-full glass rounded-xl p-4 text-left hover:bg-white/5 transition-colors"
+                        className="w-full lt-card !rounded-xl p-4 min-h-[52px] text-left"
                       >
                         <span className="font-medium">{scenario.name}</span>
                       </motion.button>
@@ -110,15 +111,15 @@ export function RoleplaySelectionScreen() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: categories.length * 0.1 }}
-              className="pt-4 border-t border-surface-700"
+              className="pt-4 border-t lt-divider"
             >
               <button
                 onClick={handleCustomScenario}
-                className="w-full glass rounded-xl p-4 text-left hover:bg-white/5 transition-colors border-2 border-dashed border-primary-500/30"
+                className="w-full lt-card !rounded-xl p-4 min-h-[52px] text-left !border-dashed !border-[#9a9a9a]"
               >
                 <div className="flex items-center gap-3">
-                  <Plus className="w-5 h-5 text-primary-400" />
-                  <span className="font-medium text-primary-400">Custom scenario</span>
+                  <Plus className="w-5 h-5" />
+                  <span className="font-medium">Custom scenario</span>
                 </div>
               </button>
             </motion.div>

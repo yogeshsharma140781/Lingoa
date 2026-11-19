@@ -1,7 +1,19 @@
 import { motion } from 'framer-motion'
-import { ArrowLeft, Sparkles } from 'lucide-react'
+import { ArrowLeft, Sparkles, Sun, UtensilsCrossed, Briefcase, Users, Plane, Gamepad2, PartyPopper, Dices, type LucideIcon } from 'lucide-react'
 import { useStore, TOPICS } from '../store'
 import { unlockAudio } from '../hooks/useApi'
+
+// Line icons keep the screen in greys (the topics' colour emoji would not).
+const TOPIC_ICONS: Record<string, LucideIcon> = {
+  daily: Sun,
+  food: UtensilsCrossed,
+  work: Briefcase,
+  family: Users,
+  travel: Plane,
+  hobbies: Gamepad2,
+  weekend: PartyPopper,
+  random: Dices,
+}
 
 export function TopicSelectionScreen() {
   const { 
@@ -35,19 +47,20 @@ export function TopicSelectionScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full relative z-10 text-white p-6 flex flex-col overflow-hidden"
+      className="h-full relative z-10 bg-white text-[#111111] p-6 flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <button
           onClick={handleBack}
-          className="p-2 hover:bg-surface-800 rounded-full transition-colors"
+          className="lt-back"
+          aria-label="Back"
         >
-          <ArrowLeft className="w-6 h-6" />
+          <ArrowLeft className="w-5 h-5" />
         </button>
         <button
           onClick={handleSkip}
-          className="text-surface-400 hover:text-white text-sm transition-colors"
+          className="lt-text-btn"
         >
           Skip
         </button>
@@ -55,8 +68,8 @@ export function TopicSelectionScreen() {
 
       {/* Title */}
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold mb-2">What shall we chat about?</h1>
-        <p className="text-surface-400 text-sm">
+        <h1 className="font-display text-3xl font-semibold mb-2 tracking-tight">What shall we chat about?</h1>
+        <p className="lt-muted text-sm">
           Pick a topic to get started, or skip for a surprise
         </p>
       </div>
@@ -74,23 +87,20 @@ export function TopicSelectionScreen() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
                 onClick={() => handleTopicSelect(topic.id)}
-                className={`
-                  relative p-4 rounded-xl text-left transition-all
-                  ${isLastUsed 
-                    ? 'bg-surface-800 border border-surface-700' 
-                    : 'bg-surface-800/50 hover:bg-surface-800 border border-transparent hover:border-surface-700'
-                  }
-                `}
+                className={`lt-card relative p-4 text-left flex flex-col items-start justify-start ${isLastUsed ? '!border-[#111111]' : ''}`}
               >
-                {/* Emoji */}
-                <span className="text-3xl mb-2 block">{topic.emoji}</span>
+                {/* Icon */}
+                {(() => {
+                  const Icon = TOPIC_ICONS[topic.id] ?? Sparkles
+                  return <span className="lt-tile mb-3"><Icon className="w-5 h-5" /></span>
+                })()}
                 
                 {/* Name */}
                 <span className="font-medium block">{topic.name}</span>
 
                 {/* Last used indicator */}
                 {isLastUsed && (
-                  <span className="absolute top-2 right-2 text-xs text-surface-500">
+                  <span className="absolute top-3 right-3 text-xs lt-faint">
                     last time
                   </span>
                 )}
@@ -109,10 +119,10 @@ export function TopicSelectionScreen() {
       >
         <button
           onClick={handleSkip}
-          className="inline-flex items-center gap-2 text-primary-400 hover:text-primary-300 transition-colors"
+          className="lt-text-btn inline-flex items-center gap-2 no-underline"
         >
           <Sparkles className="w-4 h-4" />
-          <span className="text-sm">Or let me surprise you</span>
+          <span>Or let me surprise you</span>
         </button>
       </motion.div>
     </motion.div>

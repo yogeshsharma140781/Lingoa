@@ -24,22 +24,23 @@ export function CustomRoleplayScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full relative z-10 text-white p-6 flex flex-col overflow-hidden"
+      className="h-full relative z-10 bg-white text-[#111111] p-6 flex flex-col overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center mb-8">
         <button
           onClick={handleBack}
-          className="p-2 hover:bg-surface-800 rounded-full transition-colors"
+          className="lt-back"
+          aria-label="Back"
         >
-          <ArrowLeft className="w-6 h-6" />
+          <ArrowLeft className="w-5 h-5" />
         </button>
       </div>
 
       {/* Title */}
       <div className="text-center mb-8">
-        <h2 className="font-display text-3xl font-bold mb-2">Custom Scenario</h2>
-        <p className="text-surface-400">Describe the situation you want to practice</p>
+        <h2 className="font-display text-3xl font-semibold mb-2 tracking-tight">Custom scenario</h2>
+        <p className="lt-muted">Describe the situation you want to practice</p>
       </div>
 
       {/* Input */}
@@ -48,7 +49,7 @@ export function CustomRoleplayScreen() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Describe the situation (e.g. conversation at the local municipal office)"
-          className="flex-1 glass rounded-2xl p-4 text-white placeholder-surface-500 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="flex-1 lt-card p-4 text-[#111111] placeholder-[#767676] resize-none focus:outline-none focus:!border-[#111111] text-base"
           autoFocus
         />
 
@@ -58,10 +59,10 @@ export function CustomRoleplayScreen() {
           animate={{ opacity: 1, y: 0 }}
           onClick={handleStart}
           disabled={!input.trim()}
-          className="w-full btn-primary rounded-2xl py-5 flex items-center justify-center gap-3 font-semibold text-lg text-white shadow-lg mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="lt-primary mt-6"
         >
-          <Play className="w-6 h-6" fill="currentColor" />
-          Start Role-play
+          <Play className="w-5 h-5" fill="currentColor" />
+          Start role-play
         </motion.button>
       </div>
     </motion.div>

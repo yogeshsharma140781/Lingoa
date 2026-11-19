@@ -35,7 +35,7 @@ export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 z-50 flex items-end justify-center p-4"
+      className="absolute inset-0 z-50 flex items-end justify-center p-4 bg-black/30"
       onClick={finish}
     >
       <motion.div
@@ -43,17 +43,17 @@ export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 30, opacity: 0 }}
         transition={{ duration: 0.2 }}
-        className="w-full max-w-md glass rounded-2xl p-6 border border-white/10"
+        className="w-full max-w-md lt-card p-6 shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="w-12 h-12 rounded-full bg-primary-500/20 flex items-center justify-center mb-4">
-          <Bell className="w-6 h-6 text-primary-400" />
+        <div className="lt-tile mb-4">
+          <Bell className="w-5 h-5" />
         </div>
 
-        <h3 className="font-display text-xl font-bold mb-2">
+        <h3 className="font-display text-xl font-semibold mb-2">
           Never lose your streak
         </h3>
-        <p className="text-surface-400 text-sm mb-5 leading-relaxed">
+        <p className="lt-muted text-sm mb-5 leading-relaxed">
           {streak > 0 ? (
             <>We'll only remind you in the evening, and only if you haven't practiced yet that day.</>
           ) : (
@@ -62,7 +62,7 @@ export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
         </p>
 
         {streak > 0 && (
-          <div className="flex items-center gap-2 mb-5 text-sm text-primary-400">
+          <div className="flex items-center gap-2 mb-5 text-sm font-medium">
             <Flame className="w-4 h-4" />
             <span>{streak}-day streak going</span>
           </div>
@@ -71,13 +71,13 @@ export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
         <div className="flex gap-3">
           <button
             onClick={finish}
-            className="flex-1 glass rounded-xl py-3 font-medium text-surface-400 hover:bg-white/10 transition-colors"
+            className="lt-secondary flex-1 !min-h-[48px]"
           >
             Not now
           </button>
           <button
             onClick={handleEnable}
-            className="flex-1 btn-primary rounded-xl py-3 font-semibold text-white"
+            className="lt-primary flex-1 !min-h-[48px] !text-base"
           >
             Enable
           </button>

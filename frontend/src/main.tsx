@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import { Capacitor } from '@capacitor/core'
 import App from './App'
 import { loadAppInfo } from './appInfo'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/source-serif-4'
 import './index.css'
 
 // Dev only: open /?conversation-gallery to see every conversation state with mock data.

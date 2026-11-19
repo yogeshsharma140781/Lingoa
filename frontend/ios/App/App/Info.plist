@@ -46,7 +46,7 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>UIUserInterfaceStyle</key>
-	<string>Dark</string>
+	<string>Light</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Lingoa needs microphone access to record your voice for language practice conversations.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
