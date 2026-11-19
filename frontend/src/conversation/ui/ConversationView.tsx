@@ -98,6 +98,24 @@ function PlayButton({ label, playing, onClick }: { label: string; playing: boole
   )
 }
 
+/**
+ * Scroll a card into view inside the scrolling area. If it is taller than the visible area, line its top
+ * edge up with the top of the area (so the learner starts reading at the beginning); otherwise make
+ * sure all of it is visible. Uses the container's own scrollTo (scrollIntoView misbehaves in WKWebView).
+ */
+function revealCard(box: HTMLElement, card: HTMLElement) {
+  const margin = 12
+  const b = box.getBoundingClientRect()
+  const c = card.getBoundingClientRect()
+  let delta = 0
+  if (c.height + margin * 2 > b.height) delta = c.top - b.top - margin // taller than the screen: show its top
+  else if (c.bottom > b.bottom - margin) delta = c.bottom - (b.bottom - margin) // cut off below: bring it up
+  else if (c.top < b.top + margin) delta = c.top - b.top - margin // above the visible part
+  if (Math.abs(delta) < 1) return
+  const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  box.scrollTo({ top: box.scrollTop + delta, behavior: reduce ? 'auto' : 'smooth' })
+}
+
 export function ConversationView(props: ConversationViewProps) {
   const {
     state, language, scenarioTitle, personaName, aiLine, showTranslation, evaluation, hints,
@@ -111,6 +129,10 @@ export function ConversationView(props: ConversationViewProps) {
   const avatarLabel = state.name === 'feedback' ? reaction : view.avatarLabel
 
   // Move focus to the primary control when feedback appears, so VoiceOver users land on it.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const alternativeRef = useRef<HTMLElement>(null)
+  const hintCardRef = useRef<HTMLElement>(null)
+  const previousName = useRef(state.name)
   const continueRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (state.name === 'feedback') continueRef.current?.focus({ preventScroll: true })
@@ -122,6 +144,31 @@ export function ConversationView(props: ConversationViewProps) {
 
   const showAlternative =
     view.showTranscript && !!evaluation?.alternative && (level === 'good' || level === 'almost')
+
+  // Back to the top when the next turn starts, so the avatar and the AI's line are in view again.
+  useEffect(() => {
+    const was = previousName.current
+    previousName.current = state.name
+    if (was === 'feedback' && state.name !== 'feedback') scrollRef.current?.scrollTo({ top: 0 })
+  }, [state.name])
+
+  // The better alternative appears below the fold on small phones or with larger text: scroll to it.
+  useEffect(() => {
+    if (state.name !== 'feedback' || !showAlternative) return
+    const id = requestAnimationFrame(() => {
+      if (scrollRef.current && alternativeRef.current) revealCard(scrollRef.current, alternativeRef.current)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [state.name, showAlternative, evaluation])
+
+  // Same for the hint card.
+  useEffect(() => {
+    if (!showHintCard) return
+    const id = requestAnimationFrame(() => {
+      if (scrollRef.current && hintCardRef.current) revealCard(scrollRef.current, hintCardRef.current)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [showHintCard, hints?.answer])
 
   return (
     <div className="conv-root" data-state={state.name}>
@@ -142,7 +189,7 @@ export function ConversationView(props: ConversationViewProps) {
       </header>
 
       {/* Scrolls only when text is large or the phone is small; header and footer stay put. */}
-      <div className="conv-scroll">
+      <div className="conv-scroll" ref={scrollRef}>
       {/* Top half: the AI. Same place in every state. */}
       <div className="conv-avatar-wrap">
         <Avatar
@@ -207,7 +254,7 @@ export function ConversationView(props: ConversationViewProps) {
         )}
 
         {showHintCard && hints && (
-          <section className="conv-card" aria-label="Hints">
+          <section className="conv-card" aria-label="Hints" ref={hintCardRef}>
             <h2 className="conv-card-title" style={{ fontWeight: 400 }}>You could say either of these:</h2>
             {hints.answer ? (
               <div className="conv-suggestion">
@@ -232,7 +279,7 @@ export function ConversationView(props: ConversationViewProps) {
         )}
 
         {showAlternative && evaluation?.alternative && (
-          <section className="conv-card conv-alt" aria-label="Better alternative">
+          <section className="conv-card conv-alt" aria-label="Better alternative" ref={alternativeRef}>
             <h2 className="conv-card-title" style={{ fontWeight: 400 }}>Better alternative</h2>
             <div className="conv-suggestion">
               <div lang={language}><Alternative text={evaluation.alternative} changed={evaluation.changedWords} language={language} /></div>
