@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { Trophy, ArrowRight, Flame, Home } from 'lucide-react'
 import { useStore } from '../store'
+import { DotRing } from '../conversation/ui/DotRing'
 
 export function CompletionScreen() {
   const { setScreen, speakingTime, targetTime, streak } = useStore()
@@ -29,11 +30,11 @@ export function CompletionScreen() {
         >
           {/* The avatar ring: solid when the daily goal is reached, dashed when it is not yet */}
           <svg viewBox="0 0 120 120" className="absolute inset-0" aria-hidden="true">
-            <circle
-              cx="60" cy="60" r={completedFull ? 56 : 57} fill="none" stroke="#c4c4c4"
-              strokeWidth={completedFull ? 8 : 4} strokeLinecap="round"
-              strokeDasharray={completedFull ? undefined : '7 6'}
-            />
+            {completedFull ? (
+              <circle cx="60" cy="60" r="56" fill="none" stroke="#c4c4c4" strokeWidth="8" strokeLinecap="round" />
+            ) : (
+              <DotRing color="#c4c4c4" />
+            )}
           </svg>
           <div className="absolute inset-[10px] rounded-full bg-[#f3f3f3] flex items-center justify-center">
             <Trophy className="w-12 h-12 text-[#262626]" strokeWidth={1.5} />

@@ -3,6 +3,7 @@
 
 import { Loader2, Mic, MicOff } from 'lucide-react'
 import type { MicPermissionState } from './useMicPermission'
+import { DotRing } from './ui/DotRing'
 
 interface MicGateProps {
   permission: MicPermissionState
@@ -28,7 +29,7 @@ export function MicGate({ permission, isNativeIos, startError, onRequest, onOpen
       <div className="h-full flex flex-col items-center justify-center p-6 relative z-10 bg-white text-[#111111]">
         <div className="relative w-32 h-32 mb-8">
           <svg viewBox="0 0 120 120" className="absolute inset-0" aria-hidden="true">
-            <circle cx="60" cy="60" r="57" fill="none" stroke="#c4c4c4" strokeWidth="4" strokeLinecap="round" strokeDasharray="7 6" />
+            <DotRing color="#c4c4c4" />
           </svg>
           <div className="absolute inset-[10px] rounded-full bg-[#f3f3f3] flex items-center justify-center">
             <Mic className="w-12 h-12 text-[#262626]" strokeWidth={1.5} />

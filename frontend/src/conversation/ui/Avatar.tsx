@@ -1,5 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion'
 import type { ReactNode } from 'react'
+import { DotRing } from './DotRing'
 
 export interface AvatarProps {
   /** Solid ring while the AI speaks, dashed otherwise. */
@@ -50,17 +51,19 @@ export function Avatar({ ring, listening = false, name, renderInner, tappable = 
               : { duration: 0.15 }
         }
       >
-        <circle
-          cx={SIZE / 2}
-          cy={SIZE / 2}
-          r={solid ? 56 : 57}
-          fill="none"
-          stroke={color}
-          strokeWidth={solid ? 8 : 4}
-          strokeLinecap="round"
-          strokeDasharray={solid ? undefined : '7 6'}
-          style={{ transition: 'stroke 200ms ease' }}
-        />
+        {solid ? (
+          <circle
+            cx={SIZE / 2}
+            cy={SIZE / 2}
+            r={56}
+            fill="none"
+            stroke={color}
+            strokeWidth={8}
+            strokeLinecap="round"
+          />
+        ) : (
+          <DotRing size={SIZE} color={color} fade={listening} />
+        )}
       </motion.svg>
       <div className="conv-avatar-inner">{inner}</div>
     </>
