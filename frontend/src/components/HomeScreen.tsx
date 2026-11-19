@@ -1,7 +1,8 @@
 import { Flag } from './Flag'
+import logo from '../assets/logo.svg'
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Flame, Play, ChevronDown, Check, Mic, Globe, X } from 'lucide-react'
+import { Flame, Play, ChevronDown, Check, Globe, X } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
 import { unlockAudio, useApi } from '../hooks/useApi'
 import { NotificationPrompt } from './NotificationPrompt'
@@ -99,17 +100,17 @@ export function HomeScreen() {
         transition={{ delay: 0.2 }}
         className="flex flex-col items-center text-center"
       >
-        {/* The avatar ring from the conversation screen, with a mic inside */}
-        <div className="relative w-28 h-28 mb-8">
-          <svg viewBox="0 0 120 120" className="absolute inset-0" aria-hidden="true">
-            <circle cx="60" cy="60" r="57" fill="none" stroke="#c4c4c4" strokeWidth="4" strokeLinecap="round" strokeDasharray="7 6" />
-          </svg>
-          <div className="absolute inset-[10px] rounded-full bg-[#f3f3f3] flex items-center justify-center">
-            <Mic className="w-10 h-10 text-[#262626]" strokeWidth={1.5} />
-          </div>
-        </div>
-
-        <h1 className="font-display text-5xl font-semibold mb-4 tracking-tight">Lingoa</h1>
+        {/* The logo already contains the word "Lingoa" */}
+        <h1 className="mb-6">
+          <img
+            src={logo}
+            alt="Lingoa"
+            width={688}
+            height={412}
+            draggable={false}
+            className="block w-[min(76vw,300px)] h-auto select-none"
+          />
+        </h1>
         <p className="lt-muted text-lg max-w-xs mb-8 leading-snug">
           Practice language by speaking for {targetMinutesLabel}. Every day. No lessons, just conversations.
         </p>
