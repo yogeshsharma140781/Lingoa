@@ -99,18 +99,20 @@ function PlayButton({ label, playing, onClick }: { label: string; playing: boole
 }
 
 /**
- * Scroll a card into view inside the scrolling area. If it is taller than the visible area, line its top
- * edge up with the top of the area (so the learner starts reading at the beginning); otherwise make
- * sure all of it is visible. Uses the container's own scrollTo (scrollIntoView misbehaves in WKWebView).
+ * Scroll everything from the top of `first` to the bottom of `last` into view inside the scrolling area.
+ * If all of it fits, make sure all of it is visible. If it is too tall for the screen, line the top of
+ * `first` up with the top of the area, so reading starts at the beginning. Uses the container's own
+ * scrollTo (scrollIntoView misbehaves in WKWebView).
  */
-function revealCard(box: HTMLElement, card: HTMLElement) {
+function revealCard(box: HTMLElement, first: HTMLElement, last: HTMLElement = first) {
   const margin = 12
   const b = box.getBoundingClientRect()
-  const c = card.getBoundingClientRect()
+  const top = first.getBoundingClientRect().top
+  const bottom = last.getBoundingClientRect().bottom
   let delta = 0
-  if (c.height + margin * 2 > b.height) delta = c.top - b.top - margin // taller than the screen: show its top
-  else if (c.bottom > b.bottom - margin) delta = c.bottom - (b.bottom - margin) // cut off below: bring it up
-  else if (c.top < b.top + margin) delta = c.top - b.top - margin // above the visible part
+  if (bottom - top + margin * 2 > b.height) delta = top - b.top - margin // too tall for the screen: start at the top of the first element
+  else if (bottom > b.bottom - margin) delta = bottom - (b.bottom - margin) // cut off below: bring it all up
+  else if (top < b.top + margin) delta = top - b.top - margin // above the visible part
   if (Math.abs(delta) < 1) return
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
   box.scrollTo({ top: box.scrollTop + delta, behavior: reduce ? 'auto' : 'smooth' })
@@ -131,6 +133,7 @@ export function ConversationView(props: ConversationViewProps) {
   // Move focus to the primary control when feedback appears, so VoiceOver users land on it.
   const scrollRef = useRef<HTMLDivElement>(null)
   const alternativeRef = useRef<HTMLElement>(null)
+  const saidRef = useRef<HTMLDivElement>(null)
   const hintCardRef = useRef<HTMLElement>(null)
   const previousName = useRef(state.name)
   const continueRef = useRef<HTMLButtonElement>(null)
@@ -152,11 +155,15 @@ export function ConversationView(props: ConversationViewProps) {
     if (was === 'feedback' && state.name !== 'feedback') scrollRef.current?.scrollTo({ top: 0 })
   }, [state.name])
 
-  // The better alternative appears below the fold on small phones or with larger text: scroll to it.
+  // On the feedback screen the learner's own words matter most, and a long AI line above can push them (and
+  // the better alternative) below the fold. Scroll so "YOU SAID" and the alternative are fully visible; if they
+  // do not both fit, start with the learner's own words.
   useEffect(() => {
-    if (state.name !== 'feedback' || !showAlternative) return
+    if (state.name !== 'feedback') return
     const id = requestAnimationFrame(() => {
-      if (scrollRef.current && alternativeRef.current) revealCard(scrollRef.current, alternativeRef.current)
+      if (scrollRef.current && saidRef.current) {
+        revealCard(scrollRef.current, saidRef.current, showAlternative ? alternativeRef.current ?? undefined : undefined)
+      }
     })
     return () => cancelAnimationFrame(id)
   }, [state.name, showAlternative, evaluation])
@@ -272,10 +279,10 @@ export function ConversationView(props: ConversationViewProps) {
         )}
 
         {view.showTranscript && evaluation && evaluation.transcript && (
-          <>
+          <div className="conv-said-block" ref={saidRef}>
             <div className="conv-said-label">YOU SAID</div>
             <p className="conv-said conv-serif" lang={language}>{evaluation.transcript}</p>
-          </>
+          </div>
         )}
 
         {showAlternative && evaluation?.alternative && (

@@ -287,10 +287,11 @@
 .conv-play[data-playing='true'] { background: #d9d9d9; }
 
 /* ---- feedback ---- */
+.conv-said-block { width: 100%; }
 .conv-said-label { margin-top: 18px; font-size: 0.75em; letter-spacing: 0.06em; color: #262626; text-align: center; }
 .conv-said {
   margin: 8px 0 0;
-  font-size: min(1.8em, 32px);
+  font-size: min(1.9375em, 35px); /* a little under the AI's line (min(2.125em, 38px)) */
   line-height: 1.2;
   text-align: center;
   color: #111;
