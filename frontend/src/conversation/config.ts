@@ -106,3 +106,18 @@ export const SKIP_UTTERANCES: Record<string, string> = {
   ja: 'わかりません。',
   ko: '모르겠어요.',
 }
+
+/** A phrase for buying time ("give me a moment"), per language. Shown at once when the hint opens. */
+export const STALL_PHRASES: Record<string, string> = {
+  en: 'Give me a moment to think.',
+  es: 'Un momento, déjame pensar.',
+  fr: 'Un instant, je réfléchis.',
+  de: 'Einen Moment, ich überlege kurz.',
+  nl: 'Een moment, ik denk even na.',
+  it: 'Un attimo, ci devo pensare.',
+  pt: 'Um momento, deixa eu pensar.',
+  hi: 'एक मिनट, मुझे सोचने दीजिए।',
+  zh: '请等一下，我想想。',
+  ja: 'ちょっと考えさせてください。',
+  ko: '잠깐만요, 생각 좀 해볼게요.',
+}

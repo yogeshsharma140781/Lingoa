@@ -29,6 +29,8 @@ export interface ConversationViewProps {
   showLiveTranscript?: boolean
   /** The feedback moves on by itself: no Continue button. */
   autoContinue?: boolean
+  /** The learner opened the hint for this line: keep it on screen, whatever the mic hears. */
+  hintPinned?: boolean
   renderAvatarInner?: AvatarProps['renderInner']
 
   onClose: () => void
@@ -114,6 +116,10 @@ export function ConversationView(props: ConversationViewProps) {
     if (state.name === 'feedback') continueRef.current?.focus({ preventScroll: true })
   }, [state.name])
 
+  const listeningStates = ['userListening', 'userWaiting', 'hintShown', 'userSpeaking']
+  const showHintCard = view.showHintCard || (!!props.hintPinned && listeningStates.includes(state.name))
+  const showHintButton = view.showHintButton && !props.hintPinned
+
   const showAlternative =
     view.showTranscript && !!evaluation?.alternative && (level === 'good' || level === 'almost')
 
@@ -196,17 +202,21 @@ export function ConversationView(props: ConversationViewProps) {
           <p className="conv-said conv-serif" style={{ marginTop: 10 }} lang={language}>{liveTranscript}</p>
         )}
 
-        {view.showHintButton && (
+        {showHintButton && (
           <button type="button" className="conv-hint-btn" onClick={props.onShowHint}>Show a hint</button>
         )}
 
-        {view.showHintCard && hints && (
+        {showHintCard && hints && (
           <section className="conv-card" aria-label="Hints">
             <h2 className="conv-card-title" style={{ fontWeight: 400 }}>You could say either of these:</h2>
-            <div className="conv-suggestion">
-              <p lang={language}>{hints.answer}</p>
-              <PlayButton label={`Hear: ${hints.answer}`} playing={playing === 'hintAnswer'} onClick={() => props.onPlay('hintAnswer')} />
-            </div>
+            {hints.answer ? (
+              <div className="conv-suggestion">
+                <p lang={language}>{hints.answer}</p>
+                <PlayButton label={`Hear: ${hints.answer}`} playing={playing === 'hintAnswer'} onClick={() => props.onPlay('hintAnswer')} />
+              </div>
+            ) : (
+              <div className="conv-suggestion" aria-busy="true"><div className="conv-skeleton" /></div>
+            )}
             <div className="conv-suggestion">
               <p lang={language}>{hints.stall}</p>
               <PlayButton label={`Hear: ${hints.stall}`} playing={playing === 'hintStall'} onClick={() => props.onPlay('hintStall')} />

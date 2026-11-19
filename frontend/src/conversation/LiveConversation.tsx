@@ -16,7 +16,7 @@ import { API_BASE, stopAllAudio, unlockAudio, useApi } from '../hooks/useApi'
 import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { TOPICS, useStore } from '../store'
-import { DEFAULT_TURN_CONFIG, PERSONA_NAMES, REACTION_FALLBACKS, SKIP_UTTERANCES } from './config'
+import { DEFAULT_TURN_CONFIG, PERSONA_NAMES, REACTION_FALLBACKS, SKIP_UTTERANCES, STALL_PHRASES } from './config'
 import { MicGate } from './MicGate'
 import { autoContinues, describeState, initialState, transition, type ConversationEvent, type ConversationState } from './stateMachine'
 import { TurnTaker, type TurnAction, type TurnSnapshot } from './turnTaking'
@@ -66,6 +66,8 @@ export function LiveConversation() {
   const [showTranslation, setShowTranslation] = useState(false)
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null)
   const [hints, setHints] = useState<Hints | null>(null)
+  // The learner opened the hint for this AI line: it stays up until the line changes, whatever the mic hears.
+  const [hintPinned, setHintPinned] = useState(false)
   const [playing, setPlaying] = useState<PlayTarget | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [scenarioTitle, setScenarioTitle] = useState('Conversation')
@@ -437,6 +439,7 @@ export function LiveConversation() {
     if (!sessionId || !aiLine.text) return
     let cancelled = false
     setHints(null)
+    setHintPinned(false)
     apiRef.current.getHints().then((h) => { if (!cancelled && h) setHints(h) })
     return () => { cancelled = true }
   }, [sessionId, aiLine.text])
@@ -465,7 +468,7 @@ export function LiveConversation() {
   useEffect(() => () => { stopAllAudio() }, [])
 
   // ---- what the buttons do ----
-  const handleClose = useCallback(async () => {
+  const handleClose = useCallback(() => {
     if (closingRef.current) return
     closingRef.current = true
     micOnRef.current = false
@@ -483,31 +486,33 @@ export function LiveConversation() {
       : turnIndexRef.current === 0 ? 'before_first_speech'
       : 'waiting_to_speak'
     const { logEvent, endSession } = apiRef.current
-    try {
-      logEvent('conversation_closed', {
-        duration_ms: sessionStartedAtRef.current ? Date.now() - sessionStartedAtRef.current : null,
-        turns: turnIndexRef.current,
-        speaking_ms: Math.round(s.speakingTime),
-        spoke: s.speakingTime > 0,
-        last_state: lastState,
-        last_struggle: null,
-        ms_since_struggle: null,
-        ui: 'v2',
-      })
-      if (s.speakingTime > 0) {
-        // Leave them with a kind word on the home screen.
-        s.setSessionWrapUp({ speakingMs: s.speakingTime, hitGoal: s.speakingTime >= s.targetTime, languageCode: s.targetLanguage })
-        const result = await endSession(s.speakingTime)
-        if (result?.completed) {
-          cancelTodayReminder()
-          if (Capacitor.isNativePlatform() && !hasSeenNotificationPrompt()) s.setPendingNotificationPrompt(true)
-        }
-      }
-    } catch (err) {
-      console.error('Error closing session:', err)
-    } finally {
-      s.resetSession()
-      s.setScreen('home')
+    const speakingMs = s.speakingTime
+    const hitGoal = speakingMs >= s.targetTime
+    const language = s.targetLanguage
+    logEvent('conversation_closed', {
+      duration_ms: sessionStartedAtRef.current ? Date.now() - sessionStartedAtRef.current : null,
+      turns: turnIndexRef.current,
+      speaking_ms: Math.round(speakingMs),
+      spoke: speakingMs > 0,
+      last_state: lastState,
+      last_struggle: null,
+      ms_since_struggle: null,
+      ui: 'v2',
+    })
+    // Leave them with a kind word on the home screen, and leave RIGHT NOW. Saving the session on the
+    // server can take seconds (longer if it is waking up), so that happens in the background.
+    if (speakingMs > 0) s.setSessionWrapUp({ speakingMs, hitGoal, languageCode: language })
+    s.resetSession()
+    s.setScreen('home')
+    if (speakingMs > 0) {
+      endSession(speakingMs)
+        .then((result) => {
+          if (result?.completed) {
+            cancelTodayReminder()
+            if (Capacitor.isNativePlatform() && !hasSeenNotificationPrompt()) useStore.getState().setPendingNotificationPrompt(true)
+          }
+        })
+        .catch((err) => console.error('Error ending session:', err))
     }
   }, [stopRecording])
 
@@ -554,13 +559,19 @@ export function LiveConversation() {
 
   const onShowHint = useCallback(() => {
     apiRef.current.logEvent('suggestions_shown', { trigger: 'tap', ui: 'v2' })
+    setHintPinned(true)
     send({ type: 'SHOW_HINT' })
+    // The card opens at once (with the "give me a moment" phrase); if the answer never arrived, ask again.
+    if (!hintsRef.current?.answer) {
+      const line = lastAiTextRef.current
+      apiRef.current.getHints().then((h) => { if (h && lastAiTextRef.current === line) setHints(h) })
+    }
   }, [send])
 
   const onPlay = useCallback(async (target: PlayTarget) => {
     const text =
       target === 'hintAnswer' ? hints?.answer
-      : target === 'hintStall' ? hints?.stall
+      : target === 'hintStall' ? (hints?.stall || STALL_PHRASES[language] || STALL_PHRASES.en)
       : evaluation?.alternative
     if (!text) return
     if (target === 'alternative') apiRef.current.logEvent('correction_heard', { ui: 'v2' })
@@ -576,7 +587,7 @@ export function LiveConversation() {
       const name = stateRef.current.name
       if (reopen && !closingRef.current && (name === 'hintShown' || name === 'userWaiting' || name === 'userListening')) openMic()
     }
-  }, [hints, evaluation, closeMic, openMic])
+  }, [hints, evaluation, language, closeMic, openMic])
 
   const onContinue = useCallback(() => {
     if (stateRef.current.name !== 'feedback') return
@@ -624,6 +635,15 @@ export function LiveConversation() {
     [autoAdvance, onContinue],
   )
 
+  // The hint card never waits on the server: the "give me a moment" phrase is always there, and the
+  // suggested answer fills in when it arrives.
+  const shownHints: Hints = {
+    answer: hints?.answer ?? '',
+    stall: hints?.stall || STALL_PHRASES[language] || STALL_PHRASES.en,
+  }
+  const hintsRef = useRef<Hints | null>(null)
+  hintsRef.current = hints
+
   // The transcript sheet reads the conversation so far.
   const messages = useMemo(
     () => conversationHistory.map((m) => ({ role: m.role === 'assistant' ? ('ai' as const) : ('you' as const), text: m.content })),
@@ -654,7 +674,8 @@ export function LiveConversation() {
         aiLine={aiLine}
         showTranslation={showTranslation}
         evaluation={evaluation}
-        hints={hints}
+        hints={shownHints}
+        hintPinned={hintPinned}
         micLevel={micLevel}
         playing={playing}
         showLiveTranscript={DEFAULT_TURN_CONFIG.showLiveTranscript}

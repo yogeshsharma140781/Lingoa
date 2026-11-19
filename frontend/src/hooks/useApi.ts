@@ -991,11 +991,22 @@ export function useApi() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId }),
       }, 12000)
-      if (!res.ok) return null
-      const data = await res.json()
-      const stall = typeof data?.stall === 'string' ? data.stall.trim() : ''
-      if (!stall) return null
-      return { answer: typeof data?.answer === 'string' ? data.answer.trim() : '', stall }
+      if (res.ok) {
+        const data = await res.json()
+        const stall = typeof data?.stall === 'string' ? data.stall.trim() : ''
+        if (stall) return { answer: typeof data?.answer === 'string' ? data.answer.trim() : '', stall }
+      }
+      // The server does not have the hints endpoint (an older version): use the suggestions one
+      // for the answer. The caller supplies the "give me a moment" phrase.
+      const old = await fetchWithTimeout(`${API_BASE}/suggestions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      }, 12000)
+      if (!old.ok) return null
+      const list = (await old.json())?.suggestions
+      const first = Array.isArray(list) && typeof list[0]?.text === 'string' ? list[0].text.trim() : ''
+      return first ? { answer: first, stall: '' } : null
     } catch (err) {
       console.error('Hints error:', err)
       return null
