@@ -71,8 +71,10 @@ function Dots() {
 
 /** The alternative sentence with the changed words in bold. */
 function Alternative({ text, changed, language }: { text: string; changed: string[]; language: string }) {
-  const set = new Set(changed.map((w) => w.toLowerCase()))
-  const strip = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]+/gu, '')
+  // \p{M} keeps combining marks: the vowel signs of Hindi, Thai and so on are not letters (\p{L}) and
+  // would otherwise be stripped out of the word before it is compared.
+  const strip = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{M}\p{N}'’-]+/gu, '')
+  const set = new Set(changed.map(strip))
   // Chinese and Japanese have no spaces: the server compares them character by character.
   const tokens = language === 'zh' || language === 'ja' ? Array.from(text) : text.split(/(\s+)/)
   return (

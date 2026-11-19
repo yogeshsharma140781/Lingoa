@@ -56,6 +56,25 @@ describe('looksFinished', () => {
   })
 })
 
+describe('looksFinished in Hindi (vowel signs must survive)', () => {
+  it('a sentence that ends on a linking word is not finished', () => {
+    expect(looksFinished('मैं बाज़ार गया था लेकिन', 'hi')).toBe(false)
+    expect(looksFinished('मैं घर नहीं गया क्योंकि', 'hi')).toBe(false)
+    expect(looksFinished('वह दिल्ली में', 'hi')).toBe(false)
+    expect(looksFinished('यह मेरे दोस्त का', 'hi')).toBe(false)
+  })
+
+  it('a sentence that ends on a content word is finished', () => {
+    expect(looksFinished('मैं आज बाज़ार जा रहा हूँ', 'hi')).toBe(true)
+    expect(looksFinished('मुझे एक कप चाय चाहिए', 'hi')).toBe(true)
+  })
+
+  it('trailing Hindi punctuation does not hide the last word', () => {
+    expect(looksFinished('मैं बाज़ार गया था लेकिन,', 'hi')).toBe(false)
+    expect(looksFinished('मैं घर जाता हूँ।', 'hi')).toBe(true)
+  })
+})
+
 describe('before any speech', () => {
   it('never submits silence: only escalates to waiting, then resting', () => {
     const h = harness()

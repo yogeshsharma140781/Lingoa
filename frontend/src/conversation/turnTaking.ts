@@ -33,7 +33,8 @@ export function looksFinished(
   if (NO_SPACE_LANGUAGES.has(language)) {
     return !endings.some((token) => lower.endsWith(token))
   }
-  const lastWord = lower.split(/\s+/).pop()!.replace(/[^\p{L}\p{N}'’-]+/gu, '')
+  // \p{M}: keep combining marks, or the vowel signs of Hindi words (लेकिन, में, का...) are stripped and never match
+  const lastWord = lower.split(/\s+/).pop()!.replace(/[^\p{L}\p{M}\p{N}'’-]+/gu, '')
   return !endings.includes(lastWord)
 }
 

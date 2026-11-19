@@ -124,6 +124,12 @@ AI_PERSONA_GENDER = "female"
 # instructions (it honors `speed` too). Override with OPENAI_TTS_MODEL if needed.
 OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 
+# Hindi speech recognition. whisper-1 spells Hindi unreliably (it wrote "कृपया" as "द्रिपेया", drops
+# chandrabindus, mixes spellings). On clean test speech gpt-4o-mini-transcribe got 8/8 sentences exactly
+# right where whisper-1 got 3/8 (gpt-4o-transcribe sometimes answered in Urdu script, so it is not used).
+# Set HINDI_TRANSCRIBE_MODEL to an empty string to go back to whisper-1.
+HINDI_TRANSCRIBE_MODEL = os.getenv("HINDI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+
 async def synthesize_with_openai(text: str, language: str, speed: float) -> bytes:
     """Speak `text` with OpenAI in the (female) persona voice; falls back to tts-1 if the newer model errors."""
     voice = VOICE_MAP.get(language, "nova")
@@ -924,30 +930,55 @@ STALL_PHRASES = {
     "ko": ["잠깐만요, 생각 좀 해볼게요."],
 }
 
-_WORD_RE = re.compile(r"[\w'’-]+", re.UNICODE)
-
-
 NO_SPACE_LANGUAGES = {"zh", "ja"}  # no spaces between words: compare character by character
 
 
+def _strip_edge_punct(token: str) -> str:
+    """Drop punctuation and symbols from both ends of a token (works for every script, danda included)."""
+    import unicodedata
+
+    start, end = 0, len(token)
+    while start < end and unicodedata.category(token[start])[0] in "PS":
+        start += 1
+    while end > start and unicodedata.category(token[end - 1])[0] in "PS":
+        end -= 1
+    return token[start:end]
+
+
 def _words(text: str, by_char: bool = False) -> list:
+    """The words of `text`, as written (no punctuation at the edges). Split on spaces, never inside a word:
+    a regex word-match would cut Hindi words at their vowel signs."""
     if by_char:
-        return [c for c in (text or "") if c.strip() and not re.match(r"[\s。、，．,.!?！？；;：:「」『』（）()\"']", c)]
-    return _WORD_RE.findall(text or "")
+        return [c for c in (text or "") if c.strip() and not _strip_edge_punct(c) == ""]
+    return [w for w in (_strip_edge_punct(t) for t in (text or "").split()) if w]
 
 
-def _norm_words(text: str, by_char: bool = False) -> list:
-    return [w.lower() for w in _words(text, by_char)]
+def _canon(token: str, language: str = "en") -> str:
+    """A spelling-blind form of a word, for comparing two sentences. Speech recognition spells words
+    differently from one run to the next, and so do people, so spelling variants must never count as mistakes."""
+    import unicodedata
+
+    t = unicodedata.normalize("NFC", token).casefold()
+    if language == "hi":
+        t = t.replace("\u093c", "")                 # nukta: ज़ = ज, ड़ = ड
+        t = t.replace("\u0901", "\u0902")           # chandrabindu = anusvara: कहाँ = कहां
+        t = t.replace("\u0950", "\u0913\u092e")     # (rare) om sign
+        t = t.replace("ए", "ये").replace("ई", "यी")   # दीजिए = दीजिये, आई = आयी
+    return t
 
 
-def changed_words_between(original: str, alternative: str, by_char: bool = False) -> list:
-    """Words of `alternative` that are new or different compared with `original`.
+def _norm_words(text: str, by_char: bool = False, language: str = "en") -> list:
+    return [_canon(w, language) for w in _words(text, by_char)]
+
+
+def changed_words_between(original: str, alternative: str, by_char: bool = False, language: str = "en") -> list:
+    """Words of `alternative` that are new or different compared with `original`, ignoring spelling variants.
     Done here with a plain diff (not by the model), so the bold words always match the text."""
     import difflib
 
-    orig = _norm_words(original, by_char)
+    orig = _norm_words(original, by_char, language)
     alt_display = _words(alternative, by_char)
-    alt = [w.lower() for w in alt_display]
+    alt = [_canon(w, language) for w in alt_display]
     changed = []
     for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(a=orig, b=alt, autojunk=False).get_opcodes():
         if tag in ("replace", "insert"):
@@ -966,15 +997,51 @@ def clean_evaluation(parsed: dict, transcript: str, language: str = "en") -> dic
     by_char = language in NO_SPACE_LANGUAGES
     if level in ("excellent", "retry"):
         alternative = ""
-    elif not alternative or _norm_words(alternative, by_char) == _norm_words(transcript, by_char):
-        # Nothing to change after all: it was fine as said.
+    elif not alternative or _norm_words(alternative, by_char, language) == _norm_words(transcript, by_char, language):
+        # Nothing to change after all (or only spelling / punctuation): it was fine as said.
         level, alternative = "excellent", ""
 
     return {
         "level": level,
         "alternative": alternative or None,
-        "changed_words": changed_words_between(transcript, alternative, by_char) if alternative else [],
+        "changed_words": changed_words_between(transcript, alternative, by_char, language) if alternative else [],
     }
+
+
+def evaluation_system_prompt(target_name: str) -> str:
+    """The instructions for judging one spoken answer. Kept in a function so it can be tested as it is used."""
+    return (
+        f"You are a careful, kind {target_name} teacher. A learner just said ONE sentence out loud. "
+        "Decide how a native speaker would have said it, and compare.\n\n"
+        "The text comes from speech recognition: ignore punctuation, capital letters and spelling that only "
+        "sounds the same. Never blame the learner for recognition errors.\n\n"
+        "SPELLING IS NOT THE LEARNER'S: the text was written by a machine, so spelling varies, above all in Hindi. "
+        "NEVER treat as a mistake, and NEVER write an alternative that differs only by: a spelling variant "
+        "(for example Hindi दीजिये / दीजिए, आयी / आई, कहाँ / कहा, बाज़ार / बाजार), a nukta, a chandrabindu or anusvara, "
+        "word spacing, punctuation, capital letters, or a word written the way it sounds. Judge ONLY what the learner "
+        "said out loud: grammar, word choice and naturalness. If the only differences you can find are spelling or "
+        "punctuation, the level is \"excellent\".\n"
+        "The learner's gender is unknown: never change masculine/feminine forms that refer to the speaker "
+        "(Hindi रहा/रही, French/Spanish/Portuguese/Italian/German endings on adjectives and participles) when the "
+        "sentence is grammatically consistent; do not correct them.\n\n"
+        "Levels:\n"
+        '- "excellent": a native speaker could say EXACTLY this, in this situation. Grammar, word choice and '
+        "tone are all natural. Short answers that are natural in conversation are excellent.\n"
+        '- "good": understandable and mostly right, but a teacher would still change something small: a missing '
+        "article or small word, a blunt or unnatural phrasing, a missing politeness word, word order, a wrong preposition.\n"
+        '- "almost": the meaning is clear but there are real mistakes: wrong verb form, wrong word, wrong gender, broken grammar.\n'
+        f'- "retry": cannot be understood, does not answer the question, is mostly not {target_name}, '
+        "or is cut off so much it means nothing.\n\n"
+        'Important: if you would write the sentence even slightly differently, it is NOT "excellent". '
+        'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve.\n\n'
+        'For "good" and "almost", "alternative" is the learner\'s OWN sentence with the SMALLEST edits that make it '
+        "correct and natural for the situation. Keep their meaning, their words and their word order wherever possible; "
+        "do not make it fancier and do not add new ideas (adding one small politeness word or article is fine). "
+        "Avoid wording that reveals the speaker's gender.\n"
+        'For "excellent" and "retry", "alternative" is null.\n'
+        f"The alternative is in {target_name} only.\n"
+        'Return JSON only: {"level": "...", "alternative": "..." or null}'
+    )
 
 
 @app.post("/api/conversation/evaluate")
@@ -1006,27 +1073,7 @@ async def evaluate_answer(data: EvaluateRequest):
                 {
                     "role": "system",
                     "content": (
-                        f"You are a careful, kind {target_name} teacher. A learner just said ONE sentence out loud. "
-                        "Decide how a native speaker would have said it, and compare.\n\n"
-                        "The text comes from speech recognition: ignore punctuation, capital letters and spelling that only "
-                        "sounds the same. Never blame the learner for recognition errors.\n\n"
-                        "Levels:\n"
-                        '- "excellent": a native speaker could say EXACTLY this, in this situation. Grammar, word choice and '
-                        "tone are all natural. Short answers that are natural in conversation are excellent.\n"
-                        '- "good": understandable and mostly right, but a teacher would still change something small: a missing '
-                        "article or small word, a blunt or unnatural phrasing, a missing politeness word, word order, a wrong preposition.\n"
-                        '- "almost": the meaning is clear but there are real mistakes: wrong verb form, wrong word, wrong gender, broken grammar.\n'
-                        f'- "retry": cannot be understood, does not answer the question, is mostly not {target_name}, '
-                        "or is cut off so much it means nothing.\n\n"
-                        'Important: if you would write the sentence even slightly differently, it is NOT "excellent". '
-                        'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve.\n\n'
-                        'For "good" and "almost", "alternative" is the learner\'s OWN sentence with the SMALLEST edits that make it '
-                        "correct and natural for the situation. Keep their meaning, their words and their word order wherever possible; "
-                        "do not make it fancier and do not add new ideas (adding one small politeness word or article is fine). "
-                        "Avoid wording that reveals the speaker's gender.\n"
-                        'For "excellent" and "retry", "alternative" is null.\n'
-                        f"The alternative is in {target_name} only.\n"
-                        'Return JSON only: {"level": "...", "alternative": "..." or null}'
+                        evaluation_system_prompt(target_name)
                     ),
                 },
                 {
@@ -1478,6 +1525,23 @@ async def transcribe_audio(
             return False
 
         async def _transcribe_once(language_hint: Optional[str]) -> tuple[str, Optional[str], Optional[str], dict]:
+            if language_hint == "hi" and HINDI_TRANSCRIBE_MODEL:
+                # Better Hindi spelling. It does not return confidence data, so the no-speech guard below simply
+                # does not apply to it (the app's own voice detection already keeps silence out).
+                try:
+                    th = await client.audio.transcriptions.create(
+                        model=HINDI_TRANSCRIBE_MODEL,
+                        file=(upload_filename, audio_data, upload_content_type),
+                        response_format="json",
+                        language="hi",
+                    )
+                    hindi_text = (getattr(th, "text", None) or "").strip()
+                    if hindi_text and not (_has_arabic(hindi_text) and not _has_devanagari(hindi_text)):
+                        print(f"[TRANSCRIBE] Hindi via {HINDI_TRANSCRIBE_MODEL}: text={hindi_text[:80]!r}")
+                        return hindi_text, "hi", "hi", {}
+                    print(f"[TRANSCRIBE] {HINDI_TRANSCRIBE_MODEL} gave nothing or Urdu script ({hindi_text[:40]!r}); using whisper-1")
+                except Exception as hindi_err:
+                    print(f"[TRANSCRIBE] {HINDI_TRANSCRIBE_MODEL} failed ({hindi_err}); using whisper-1")
             kwargs = {
                 "model": "whisper-1",
                 # IMPORTANT: pass through the actual recorded format (e.g. audio/mp4 from Safari).
