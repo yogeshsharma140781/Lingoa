@@ -139,6 +139,7 @@ export function ConversationView(props: ConversationViewProps) {
       <div className="conv-avatar-wrap">
         <Avatar
           ring={view.ring}
+          listening={view.micOpen}
           name={personaName}
           renderInner={props.renderAvatarInner}
           tappable={view.avatarTappable}

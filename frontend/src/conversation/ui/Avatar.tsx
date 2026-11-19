@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 export interface AvatarProps {
   /** Solid ring while the AI speaks, dashed otherwise. */
   ring: 'solid' | 'dashed'
+  /** The microphone is open: the dashed ring turns orange and slowly rotates. */
+  listening?: boolean
   /** The character's name (shown inside the placeholder). */
   name: string
   /** What to draw inside the ring. Pass a Rive canvas (or any node) here later; the layout does not change. */
@@ -18,9 +20,14 @@ export interface AvatarProps {
 const SIZE = 120
 
 /** Placeholder avatar: a ring with the name inside. A Rive animation can replace the inside later. */
-export function Avatar({ ring, name, renderInner, tappable = false, onTap, tapLabel = 'Tap to continue' }: AvatarProps) {
+export function Avatar({ ring, listening = false, name, renderInner, tappable = false, onTap, tapLabel = 'Tap to continue' }: AvatarProps) {
   const reduceMotion = useReducedMotion()
   const solid = ring === 'solid'
+  // Orange means something is happening right now: the AI speaking (solid, pulsing) or the mic
+  // listening (dashed, rotating). Any other time the dashed ring is a quiet grey.
+  const rotating = !solid && listening && !reduceMotion
+  const pulsing = solid && !reduceMotion
+  const color = solid || listening ? 'var(--brand, #e2601c)' : '#c4c4c4'
 
   const inner = renderInner ? (
     renderInner({ name, ring })
@@ -34,18 +41,25 @@ export function Avatar({ ring, name, renderInner, tappable = false, onTap, tapLa
         className="conv-avatar-ring"
         viewBox={`0 0 ${SIZE} ${SIZE}`}
         aria-hidden="true"
-        animate={solid && !reduceMotion ? { scale: [1, 1.025, 1] } : { scale: 1 }}
-        transition={solid && !reduceMotion ? { duration: 1.6, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.15 }}
+        animate={pulsing ? { scale: [1, 1.07, 1], rotate: 0 } : rotating ? { scale: 1, rotate: 360 } : { scale: 1, rotate: 0 }}
+        transition={
+          pulsing
+            ? { scale: { duration: 1.3, repeat: Infinity, ease: 'easeInOut' } }
+            : rotating
+              ? { rotate: { duration: 18, repeat: Infinity, ease: 'linear' } }
+              : { duration: 0.15 }
+        }
       >
         <circle
           cx={SIZE / 2}
           cy={SIZE / 2}
           r={solid ? 56 : 57}
           fill="none"
-          stroke="#c4c4c4"
+          stroke={color}
           strokeWidth={solid ? 8 : 4}
           strokeLinecap="round"
           strokeDasharray={solid ? undefined : '7 6'}
+          style={{ transition: 'stroke 200ms ease' }}
         />
       </motion.svg>
       <div className="conv-avatar-inner">{inner}</div>
