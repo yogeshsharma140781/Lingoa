@@ -129,6 +129,16 @@ OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 # right where whisper-1 got 3/8 (gpt-4o-transcribe sometimes answered in Urdu script, so it is not used).
 # Set HINDI_TRANSCRIBE_MODEL to an empty string to go back to whisper-1.
 HINDI_TRANSCRIBE_MODEL = os.getenv("HINDI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+# Even the better transcriber sometimes writes a Hindi word with a non-standard spelling (चाए for चाय). That is the
+# machine's slip, not the learner's, so the transcript is respelled in standard Devanagari before it is shown and
+# judged. Empty string switches it off.
+HINDI_SPELLING_MODEL = os.getenv("HINDI_SPELLING_MODEL", "gpt-4o-mini")
+
+# Which model judges an answer. The small one is fast and good enough for most languages, but for Hindi it
+# nitpicked correct sentences and once even changed the meaning ("मुझे चाय चाहिए" -> "आपको चाय चाहिए"). On 12 Hindi
+# sentences, twice each, gpt-4o was right every time (the small one 9 of 12) at about the same speed.
+EVALUATION_MODEL = os.getenv("EVALUATION_MODEL", "gpt-4o-mini")
+EVALUATION_MODEL_HINDI = os.getenv("EVALUATION_MODEL_HINDI", "gpt-4o")
 
 async def synthesize_with_openai(text: str, language: str, speed: float) -> bytes:
     """Speak `text` with OpenAI in the (female) persona voice; falls back to tts-1 if the newer model errors."""
@@ -964,6 +974,8 @@ def _canon(token: str, language: str = "en") -> str:
         t = t.replace("\u0901", "\u0902")           # chandrabindu = anusvara: कहाँ = कहां
         t = t.replace("\u0950", "\u0913\u092e")     # (rare) om sign
         t = t.replace("ए", "ये").replace("ई", "यी")   # दीजिए = दीजिये, आई = आयी
+        if t.endswith("ये") and len(t) > 2:
+            t = t[:-1]                                # चाए = चाये = चाय, दीजिये = दीजिए = दीजिय
     return t
 
 
@@ -1010,7 +1022,7 @@ def clean_evaluation(parsed: dict, transcript: str, language: str = "en") -> dic
 
 def evaluation_system_prompt(target_name: str) -> str:
     """The instructions for judging one spoken answer. Kept in a function so it can be tested as it is used."""
-    return (
+    prompt = (
         f"You are a careful, kind {target_name} teacher. A learner just said ONE sentence out loud. "
         "Decide how a native speaker would have said it, and compare.\n\n"
         "The text comes from speech recognition: ignore punctuation, capital letters and spelling that only "
@@ -1033,7 +1045,8 @@ def evaluation_system_prompt(target_name: str) -> str:
         f'- "retry": cannot be understood, does not answer the question, is mostly not {target_name}, '
         "or is cut off so much it means nothing.\n\n"
         'Important: if you would write the sentence even slightly differently, it is NOT "excellent". '
-        'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve.\n\n'
+        'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve. '
+        "But leaving out a subject pronoun where native speakers do (Hindi, Spanish, Italian, Japanese...) is natural, not a mistake.\n\n"
         'For "good" and "almost", "alternative" is the learner\'s OWN sentence with the SMALLEST edits that make it '
         "correct and natural for the situation. Keep their meaning, their words and their word order wherever possible; "
         "do not make it fancier and do not add new ideas (adding one small politeness word or article is fine). "
@@ -1042,6 +1055,13 @@ def evaluation_system_prompt(target_name: str) -> str:
         f"The alternative is in {target_name} only.\n"
         'Return JSON only: {"level": "...", "alternative": "..." or null}'
     )
+    if target_name == "Hindi":
+        # Everyday Hindi is short; suggesting extra words for a sentence that is already fine makes learners feel they can never get it right.
+        prompt += (
+            "\nFor Hindi: everyday speech is short and drops words. Leaving out मुझे / आप / मैं, तो, ही, ना or a politeness "
+            "word is natural. A grammatical, natural sentence is \"excellent\" even if you would have added a word."
+        )
+    return prompt
 
 
 @app.post("/api/conversation/evaluate")
@@ -1068,7 +1088,7 @@ async def evaluate_answer(data: EvaluateRequest):
 
     try:
         resp = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=EVALUATION_MODEL_HINDI if target_language == "hi" else EVALUATION_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -1383,6 +1403,76 @@ def is_known_hallucination(text: str) -> bool:
         return False
     t = text.lower()
     return any(marker in t for marker in KNOWN_HALLUCINATION_MARKERS)
+
+
+# Hindi grammar words whose forms differ in meaning, not spelling (है / हैं / हूँ, रहा / रही ...). If the
+# respelling swaps one of these for another, that is the learner's grammar, not the machine's spelling.
+_HINDI_GRAMMAR_FORMS = {
+    "है", "हैं", "हूँ", "हो", "हूं", "था", "थी", "थे", "थीं", "रहा", "रही", "रहे", "रहीं",
+    "का", "की", "के", "को", "में", "से", "पर", "ने", "मैं", "हम", "तू", "तुम", "आप", "वह", "वे", "यह", "ये",
+}
+
+
+def accept_hindi_spelling_fixes(old: str, new: str) -> str:
+    """Take the respelled sentence only where a word's SPELLING changed. Different word count, or one grammar
+    word swapped for another, means the model did more than respell: keep the original word."""
+    import difflib
+
+    olds, news = (old or "").split(), (new or "").split()
+    if not olds or len(olds) != len(news):
+        return old
+    grammar = {_canon(w, "hi") for w in _HINDI_GRAMMAR_FORMS}
+    out = []
+    for o, n in zip(olds, news):
+        co, cn = _canon(_strip_edge_punct(o), "hi"), _canon(_strip_edge_punct(n), "hi")
+        if co == cn:
+            out.append(n)  # the same word: spelling only
+        elif co in grammar and cn in grammar:
+            out.append(o)  # a different grammar word: the learner's
+        elif difflib.SequenceMatcher(a=co, b=cn, autojunk=False).ratio() >= 0.6:
+            out.append(n)  # a close respelling
+        else:
+            out.append(o)
+    return " ".join(out)
+
+
+async def respell_hindi(text: str) -> str:
+    """Standard-spelling version of a Hindi transcript (spelling only). Returns the text unchanged on any failure."""
+    if not HINDI_SPELLING_MODEL or not (text or "").strip():
+        return text
+    try:
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=HINDI_SPELLING_MODEL,
+                temperature=0,
+                max_tokens=160,
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You fix ONLY the spelling of a Hindi sentence that was typed by a speech-recognition machine.\n"
+                            "Rewrite it in standard Devanagari spelling, including common misspellings (चाए/चाइ -> चाय, "
+                            "बजार -> बाज़ार, कृप्या -> कृपया, missing nasal marks, missing or wrong vowel signs). Keep punctuation as is.\n"
+                            "STRICT RULES: do NOT change, add, remove or reorder any word. Do NOT fix grammar: keep wrong verb forms "
+                            "(है vs हूँ vs हैं), wrong words, wrong gender and missing words EXACTLY as they are, even if they look "
+                            "like mistakes. Only the spelling of each word may change.\n"
+                            'Return JSON only: {"text": "..."}'
+                        ),
+                    },
+                    {"role": "user", "content": text},
+                ],
+            ),
+            timeout=4.0,
+        )
+        fixed = str(json.loads(resp.choices[0].message.content or "{}").get("text", "")).strip()
+        merged = accept_hindi_spelling_fixes(text, fixed) if fixed else text
+        if merged != text:
+            print(f"[TRANSCRIBE] Hindi respelled: {text!r} -> {merged!r}")
+        return merged
+    except Exception as e:
+        print(f"[TRANSCRIBE] Hindi respelling skipped ({e})")
+        return text
 
 
 @app.post("/api/transcribe")
@@ -1769,6 +1859,10 @@ async def transcribe_audio(
                 print(f"[TRANSCRIBE] Sentence improvement failed: {e}")
                 # Continue with original transcript
         
+        # Hindi: standard spelling (spelling only), so a machine misspelling is never held against the learner.
+        if text and text.strip() and (hint_code or normalize_lang_code(language)) == "hi":
+            text = await respell_hindi(text)
+
         # Build response
         response = {
             "transcript": text,
