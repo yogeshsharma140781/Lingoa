@@ -48,7 +48,8 @@ export default {
       },
       fontFamily: {
         sans: ['Inter Variable', 'Inter', 'system-ui', 'sans-serif'],
-        display: ['Source Serif 4 Variable', 'Source Serif 4', 'Georgia', 'serif'],
+        // The names contain a digit, so they must be quoted or the browser drops the whole rule.
+        display: ['"Source Serif 4 Variable"', '"Source Serif 4"', 'Georgia', 'serif'],
       },
       animation: {
         'pulse-slow': 'pulse 3s ease-in-out infinite',
