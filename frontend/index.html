@@ -8,8 +8,20 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Lingoa • Daily Speaking Practice</title>
+    <style>
+      html, body { background: #ffffff; }
+      #boot {
+        position: fixed; inset: 0; z-index: 1000;
+        display: flex; align-items: center; justify-content: center;
+        background: #ffffff; transition: opacity 280ms ease;
+      }
+      #boot img { width: min(54vw, 240px); height: auto; }
+    </style>
   </head>
   <body>
+    <!-- Shown the moment the page opens, in the same place and size as the native launch image,
+         and faded out by main.tsx once the app has drawn its first screen. -->
+    <div id="boot" aria-hidden="true"><img src="/logo.svg" alt="" width="688" height="412" /></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

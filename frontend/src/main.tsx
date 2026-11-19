@@ -36,4 +36,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 )
 
-
+// The app has rendered its first screen: fade the loading logo away, then remove it.
+const boot = document.getElementById('boot')
+if (boot) {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      boot.style.opacity = '0'
+      boot.style.pointerEvents = 'none'
+      window.setTimeout(() => boot.remove(), 350)
+    }),
+  )
+}
