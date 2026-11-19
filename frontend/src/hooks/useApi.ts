@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { useStore, Improvement, Correction } from '../store'
 import { loadAppInfo } from '../appInfo'
+import { audioKey, cacheAudio, getCachedAudio } from './audioCache'
 
 // API base URL - use full URL for iOS, relative for web
 export const getApiBase = () => {
@@ -635,23 +636,33 @@ export function useApi() {
     }
     
     try {
+      // The same sentence is always played from the same recording: the voice service delivers it
+      // differently every time it is asked, so asking again for a Replay would sound like someone else.
+      const key = audioKey(text, language, speed)
       let audioBase64: string
       if (preloadedAudio) {
         audioBase64 = preloadedAudio
+        cacheAudio(key, audioBase64)
       } else {
-        const res = await fetchWithTimeout(`${API_BASE}/tts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, language, speed }),
-        }, TTS_FETCH_TIMEOUT_MS)
+        const cached = getCachedAudio(key)
+        if (cached) {
+          audioBase64 = cached
+        } else {
+          const res = await fetchWithTimeout(`${API_BASE}/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, language, speed }),
+          }, TTS_FETCH_TIMEOUT_MS)
 
-        if (!res.ok) {
-          setIsAiSpeaking(false)
-          return
+          if (!res.ok) {
+            setIsAiSpeaking(false)
+            return
+          }
+
+          const data = await res.json()
+          audioBase64 = data.audio
+          cacheAudio(key, audioBase64)
         }
-
-        const data = await res.json()
-        audioBase64 = data.audio
       }
       const audioData = atob(audioBase64)
       const audioArray = new Uint8Array(audioData.length)

@@ -16,19 +16,22 @@ from dataclasses import dataclass
 @dataclass
 class ElevenLabsVoiceSettings:
     """Voice settings for natural conversational speech"""
-    stability: float = 0.35          # Lower = more natural variation (30-45%)
-    similarity_boost: float = 0.75   # Higher = consistent identity (65-80%)
-    style: float = 0.25              # Adds warmth without exaggeration (20-35%)
+    # Higher stability and lower style make the voice sound the same from one sentence to the next
+    # (pitch, pace, tone). With the earlier 0.35 / 0.25 every sentence was delivered differently, which
+    # a learner hears as "a different person each turn". Tune by ear: lower stability = livelier, less even.
+    stability: float = 0.65          # Higher = steadier delivery
+    similarity_boost: float = 0.80   # Higher = consistent identity
+    style: float = 0.10              # Lower = less exaggeration from sentence to sentence
     use_speaker_boost: bool = True   # Enhances clarity
 
 # Default settings - can be tuned per language
 DEFAULT_VOICE_SETTINGS = ElevenLabsVoiceSettings()
 
-# More expressive settings for Hindi (needs natural variation)
+# Slightly more expressive settings for Hindi
 HINDI_VOICE_SETTINGS = ElevenLabsVoiceSettings(
-    stability=0.30,           # More variation for natural Hindi
-    similarity_boost=0.70,
-    style=0.30,               # More warmth
+    stability=0.50,           # a little livelier than the other languages, still steady
+    similarity_boost=0.75,
+    style=0.15,
     use_speaker_boost=True
 )
 
