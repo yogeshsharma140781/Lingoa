@@ -10,7 +10,13 @@ import { ConversationView, type PlayTarget } from './ConversationView'
 import { DebugOverlay } from './DebugOverlay'
 import { TranscriptSheet } from './TranscriptSheet'
 
-const AI_LINE: AiLine = { text: 'Goedemorgen! Wat mag het zijn?', translation: 'Good morning! What can I get you?' }
+const AI_LINES: Record<string, AiLine> = {
+  short: { text: 'Goedemorgen! Wat mag het zijn?', translation: 'Good morning! What can I get you?' },
+  medium: { text: 'Goedemorgen! Welkom in ons café. Wat zou je graag willen bestellen vandaag?', translation: 'Good morning! Welcome to our café. What would you like to order today?' },
+  long: { text: 'Goedemorgen en welkom in ons café! We hebben vandaag verse koffie, thee en lekkere appeltaart. Wat zou je willen bestellen?', translation: 'Good morning and welcome to our café! Today we have fresh coffee, tea and delicious apple pie. What would you like to order?' },
+  xlong: { text: 'Goedemorgen en welkom in ons café! Vandaag hebben we verse koffie, thee, warme chocolademelk en lekkere appeltaart, en de soep van de dag is tomatensoep met balletjes. Wat zou je willen bestellen, en wil je het hier opeten of meenemen?', translation: 'Good morning and welcome! Today we have fresh coffee, tea, hot chocolate and apple pie, and the soup of the day is tomato soup with meatballs. What would you like to order, and will you eat here or take away?' },
+}
+const AI_LINE = AI_LINES.short
 const HINTS: Hints = { answer: 'Mag ik een cappuccino, alsjeblieft?', stall: 'Ik heb nog even tijd nodig.' }
 
 const EVALUATIONS: Record<'excellent' | 'good' | 'almost' | 'retry', Evaluation> = {
@@ -50,6 +56,7 @@ export default function ConversationGallery() {
   const [debug, setDebug] = useState(true)
   const [level, setLevel] = useState(0.5)
   const [animateMic, setAnimateMic] = useState(true)
+  const [aiLen, setAiLen] = useState<keyof typeof AI_LINES>('short')
 
   const fire = (event: ConversationEvent) => setState((s) => transition(s, event))
 
@@ -90,6 +97,12 @@ export default function ConversationGallery() {
             <input type="radio" checked={size === s} onChange={() => setSize(s)} /> {s.label}
           </label>
         ))}
+        <h3 style={{ margin: '16px 0 8px' }}>AI line length</h3>
+        {Object.keys(AI_LINES).map((k) => (
+          <label key={k} style={{ display: 'block' }}>
+            <input type="radio" name="ailen" checked={aiLen === k} onChange={() => setAiLen(k as keyof typeof AI_LINES)} /> {k}
+          </label>
+        ))}
         <h3 style={{ margin: '16px 0 8px' }}>Text size: {textScale}%</h3>
         <input type="range" min={100} max={200} step={10} value={textScale} onChange={(e) => setTextScale(+e.target.value)} />
         <div style={{ marginTop: 12 }}>
@@ -109,7 +122,7 @@ export default function ConversationGallery() {
             language="nl"
             scenarioTitle="Ordering at a cafe"
             personaName={PERSONA_NAMES.nl}
-            aiLine={AI_LINE}
+            aiLine={AI_LINES[aiLen]}
             showTranslation={showTranslation}
             evaluation={evaluation}
             hints={HINTS}

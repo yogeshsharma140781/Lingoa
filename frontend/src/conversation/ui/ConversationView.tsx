@@ -99,6 +99,20 @@ function PlayButton({ label, playing, onClick }: { label: string; playing: boole
 }
 
 /**
+ * How big the AI's line should be, by how long it is. A long sentence at full size would push the
+ * listening indicator off the screen, so it steps down; the tiers are in the same em/px form as the
+ * default size (`--conv-large`: min(1.875em, 32px)). East Asian characters are wider, so they count double.
+ */
+function aiLineSize(text: string): string | undefined {
+  let weight = 0
+  for (const ch of text) weight += /[\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch) ? 2 : 1
+  if (weight <= 55) return undefined // the default size
+  if (weight <= 95) return 'min(1.625em, 27px)'
+  if (weight <= 150) return 'min(1.4em, 24px)'
+  return 'min(1.25em, 21px)'
+}
+
+/**
  * Scroll everything from the top of `first` to the bottom of `last` into view inside the scrolling area.
  * If all of it fits, make sure all of it is visible. If it is too tall for the screen, line the top of
  * `first` up with the top of the area, so reading starts at the beginning. Uses the container's own
@@ -134,6 +148,8 @@ export function ConversationView(props: ConversationViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const alternativeRef = useRef<HTMLElement>(null)
   const saidRef = useRef<HTMLDivElement>(null)
+  const indicatorRef = useRef<HTMLDivElement>(null)
+  const lowerRef = useRef<HTMLDivElement>(null)
   const hintCardRef = useRef<HTMLElement>(null)
   const previousName = useRef(state.name)
   const continueRef = useRef<HTMLButtonElement>(null)
@@ -167,6 +183,18 @@ export function ConversationView(props: ConversationViewProps) {
     })
     return () => cancelAnimationFrame(id)
   }, [state.name, showAlternative, evaluation])
+
+  // When the mic opens, make sure the waveform / dots, their caption and the hint button are in view, even if
+  // the AI's line above is long. (If it still does not all fit, the top of the indicator comes first.)
+  useEffect(() => {
+    if (!view.micOpen) return
+    const id = requestAnimationFrame(() => {
+      if (scrollRef.current && indicatorRef.current) {
+        revealCard(scrollRef.current, indicatorRef.current, lowerRef.current ?? undefined)
+      }
+    })
+    return () => cancelAnimationFrame(id)
+  }, [state.name, view.micOpen, aiLine.text])
 
   // Same for the hint card.
   useEffect(() => {
@@ -211,7 +239,12 @@ export function ConversationView(props: ConversationViewProps) {
       </div>
 
       <div className="conv-ai">
-        <p className="conv-ai-line conv-serif" data-dimmed={view.aiLineDimmed} lang={language}>
+        <p
+          className="conv-ai-line conv-serif"
+          data-dimmed={view.aiLineDimmed}
+          lang={language}
+          style={aiLineSize(aiLine.text) ? ({ '--conv-ai': aiLineSize(aiLine.text) } as React.CSSProperties) : undefined}
+        >
           {aiLine.text}
         </p>
         <div className="conv-actions">
@@ -232,21 +265,21 @@ export function ConversationView(props: ConversationViewProps) {
       </div>
 
       {/* Lower half: the learner. */}
-      <div className="conv-lower">
+      <div className="conv-lower" ref={lowerRef}>
         {view.indicator === 'waveform' && (
-          <div className="conv-indicator">
+          <div className="conv-indicator" ref={indicatorRef}>
             <Waveform level={micLevel} />
             <div className="conv-caption">{view.indicatorCaption}</div>
           </div>
         )}
         {view.indicator === 'dots' && (
-          <div className="conv-indicator">
+          <div className="conv-indicator" ref={indicatorRef}>
             <Dots />
             <div className="conv-caption">{view.indicatorCaption}</div>
           </div>
         )}
         {view.indicator === 'processing' && (
-          <div className="conv-indicator">
+          <div className="conv-indicator" ref={indicatorRef}>
             <div className="conv-processing" aria-hidden="true"><i /><i /><i /></div>
             <div className="conv-caption">{view.indicatorCaption}</div>
           </div>
