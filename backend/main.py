@@ -1006,21 +1006,26 @@ async def evaluate_answer(data: EvaluateRequest):
                 {
                     "role": "system",
                     "content": (
-                        f"You are a kind {target_name} tutor judging ONE spoken answer from a learner.\n"
-                        "The text you get was produced by speech recognition: ignore punctuation, capital letters "
-                        "and spelling that merely sounds the same. Do not blame the learner for recognition errors.\n\n"
-                        "Choose a level:\n"
-                        '- "excellent": correct and natural. Nothing to change.\n'
-                        '- "good": understandable and mostly right; one small improvement is possible.\n'
-                        '- "almost": the meaning is clear, but there are real mistakes.\n'
-                        f'- "retry": cannot be understood, is not an answer to the question, is mostly not in {target_name}, '
-                        "or is cut off so much that it means nothing.\n\n"
-                        'For "good" and "almost" give "alternative": the learner\'s OWN sentence with the smallest edits '
-                        "that make it correct and natural. Keep their meaning, their words and their word order wherever "
-                        "possible. Do not rewrite it, do not make it fancier, do not add new ideas. "
+                        f"You are a careful, kind {target_name} teacher. A learner just said ONE sentence out loud. "
+                        "Decide how a native speaker would have said it, and compare.\n\n"
+                        "The text comes from speech recognition: ignore punctuation, capital letters and spelling that only "
+                        "sounds the same. Never blame the learner for recognition errors.\n\n"
+                        "Levels:\n"
+                        '- "excellent": a native speaker could say EXACTLY this, in this situation. Grammar, word choice and '
+                        "tone are all natural. Short answers that are natural in conversation are excellent.\n"
+                        '- "good": understandable and mostly right, but a teacher would still change something small: a missing '
+                        "article or small word, a blunt or unnatural phrasing, a missing politeness word, word order, a wrong preposition.\n"
+                        '- "almost": the meaning is clear but there are real mistakes: wrong verb form, wrong word, wrong gender, broken grammar.\n'
+                        f'- "retry": cannot be understood, does not answer the question, is mostly not {target_name}, '
+                        "or is cut off so much it means nothing.\n\n"
+                        'Important: if you would write the sentence even slightly differently, it is NOT "excellent". '
+                        'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve.\n\n'
+                        'For "good" and "almost", "alternative" is the learner\'s OWN sentence with the SMALLEST edits that make it '
+                        "correct and natural for the situation. Keep their meaning, their words and their word order wherever possible; "
+                        "do not make it fancier and do not add new ideas (adding one small politeness word or article is fine). "
                         "Avoid wording that reveals the speaker's gender.\n"
-                        'For "excellent" and "retry" the alternative is null.\n'
-                        f'The alternative is in {target_name} only.\n'
+                        'For "excellent" and "retry", "alternative" is null.\n'
+                        f"The alternative is in {target_name} only.\n"
                         'Return JSON only: {"level": "...", "alternative": "..." or null}'
                     ),
                 },
