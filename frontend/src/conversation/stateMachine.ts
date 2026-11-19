@@ -85,6 +85,15 @@ export function transition(state: ConversationState, event: ConversationEvent): 
   }
 }
 
+/**
+ * Does the feedback move on by itself? Only when there is nothing to study: the answer was not a
+ * retry and there is no better alternative to read or hear. (A retry needs a choice, and an
+ * alternative needs the learner's time.)
+ */
+export function autoContinues(state: ConversationState, hasAlternative: boolean): boolean {
+  return state.name === 'feedback' && state.level !== 'retry' && !hasAlternative
+}
+
 /** What a state looks like. The UI renders this and nothing else about the state. */
 export interface StateView {
   /** Avatar ring: solid while the AI speaks, dashed otherwise. */

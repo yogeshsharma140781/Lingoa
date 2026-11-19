@@ -18,6 +18,8 @@ export interface TurnConfig {
   maxTurnDuration: number
   /** Show a live transcript while the learner speaks (off in v1). */
   showLiveTranscript: boolean
+  /** A fine answer with nothing to study moves on by itself after this long. Seconds. */
+  autoContinueDelay: number
 }
 
 export const DEFAULT_TURN_CONFIG: TurnConfig = {
@@ -29,6 +31,7 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
   minSpeechDuration: 0.3,
   maxTurnDuration: 60,
   showLiveTranscript: false,
+  autoContinueDelay: 2,
 }
 
 /**

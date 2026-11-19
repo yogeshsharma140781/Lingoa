@@ -27,6 +27,8 @@ export interface ConversationViewProps {
   /** Live transcript text; shown only when `showLiveTranscript` is true. */
   liveTranscript?: string
   showLiveTranscript?: boolean
+  /** The feedback moves on by itself: no Continue button. */
+  autoContinue?: boolean
   renderAvatarInner?: AvatarProps['renderInner']
 
   onClose: () => void
@@ -232,9 +234,9 @@ export function ConversationView(props: ConversationViewProps) {
       </div>
 
       {/* Pinned at the bottom, outside the scroll area. */}
-      {(view.showContinue || view.showRetry) && (
+      {((view.showContinue && !props.autoContinue) || view.showRetry) && (
         <div className="conv-footer">
-          {view.showContinue && (
+          {view.showContinue && !props.autoContinue && (
             <button ref={continueRef} type="button" className="conv-primary" onClick={props.onContinue}>Continue</button>
           )}
           {view.showRetry && (

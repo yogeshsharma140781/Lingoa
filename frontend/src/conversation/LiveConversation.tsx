@@ -18,7 +18,7 @@ import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { TOPICS, useStore } from '../store'
 import { DEFAULT_TURN_CONFIG, PERSONA_NAMES, REACTION_FALLBACKS, SKIP_UTTERANCES } from './config'
 import { MicGate } from './MicGate'
-import { describeState, initialState, transition, type ConversationEvent, type ConversationState } from './stateMachine'
+import { autoContinues, describeState, initialState, transition, type ConversationEvent, type ConversationState } from './stateMachine'
 import { TurnTaker, type TurnAction, type TurnSnapshot } from './turnTaking'
 import type { AiLine, Evaluation, Hints } from './types'
 import { ConversationView, type PlayTarget } from './ui/ConversationView'
@@ -71,6 +71,8 @@ export function LiveConversation() {
   const [scenarioTitle, setScenarioTitle] = useState('Conversation')
   const [debugSnap, setDebugSnap] = useState<TurnSnapshot | null>(null)
   const [micLevel, setMicLevel] = useState(0)
+  // Touching a control on the feedback screen stops its "move on by itself" timer.
+  const [autoPaused, setAutoPaused] = useState(false)
 
   // ---- turn bookkeeping (refs: read by timers and callbacks) ----
   const taker = useMemo(() => new TurnTaker(DEFAULT_TURN_CONFIG, language), [language])
@@ -603,6 +605,25 @@ export function LiveConversation() {
     void playNextReply()
   }, [send, playNextReply, language])
 
+  // A fine answer with nothing to study moves on by itself after a short pause. Tapping the
+  // screen moves on sooner; touching Replay, Translate or the transcript stops the timer and
+  // brings the Continue button back, so nothing is cut off while the learner is using it.
+  const autoAdvance = autoContinues(state, !!evaluation?.alternative) && !autoPaused
+  useEffect(() => setAutoPaused(false), [evaluation])
+  useEffect(() => {
+    if (!autoAdvance) return
+    const id = window.setTimeout(() => onContinue(), DEFAULT_TURN_CONFIG.autoContinueDelay * 1000)
+    return () => window.clearTimeout(id)
+  }, [autoAdvance, onContinue])
+  const onScreenTap = useCallback(
+    (e: React.MouseEvent) => {
+      if (!autoAdvance) return
+      if ((e.target as HTMLElement).closest('button, a, [role="dialog"]')) setAutoPaused(true)
+      else onContinue()
+    },
+    [autoAdvance, onContinue],
+  )
+
   // The transcript sheet reads the conversation so far.
   const messages = useMemo(
     () => conversationHistory.map((m) => ({ role: m.role === 'assistant' ? ('ai' as const) : ('you' as const), text: m.content })),
@@ -624,7 +645,7 @@ export function LiveConversation() {
   }
 
   return (
-    <div className="conv-fullscreen">
+    <div className="conv-fullscreen" onClick={onScreenTap}>
       <ConversationView
         state={state}
         language={language}
@@ -637,6 +658,7 @@ export function LiveConversation() {
         micLevel={micLevel}
         playing={playing}
         showLiveTranscript={DEFAULT_TURN_CONFIG.showLiveTranscript}
+        autoContinue={autoAdvance}
         onClose={handleClose}
         onOpenTranscript={() => { apiRef.current.logEvent('history_opened', { ui: 'v2' }); setSheetOpen(true) }}
         onReplay={onReplay}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  autoContinues,
   describeState,
   initialState,
   STATE_NAMES,
@@ -151,5 +152,27 @@ describe('describeState', () => {
 
   it('every state has a screen-reader announcement', () => {
     for (const n of STATE_NAMES) expect(view(n).announcement.length).toBeGreaterThan(0)
+  })
+})
+
+describe('autoContinues (a fine answer moves on by itself)', () => {
+  it('moves on when the answer was fine and there is nothing to study', () => {
+    expect(autoContinues({ name: 'feedback', level: 'excellent' }, false)).toBe(true)
+    // the judge was unavailable: counts as fine, with no alternative
+    expect(autoContinues({ name: 'feedback', level: 'good' }, false)).toBe(true)
+  })
+
+  it('waits for the learner when there is an alternative to read or hear', () => {
+    expect(autoContinues({ name: 'feedback', level: 'good' }, true)).toBe(false)
+    expect(autoContinues({ name: 'feedback', level: 'almost' }, true)).toBe(false)
+  })
+
+  it('never moves on from a retry: that needs a choice', () => {
+    expect(autoContinues({ name: 'feedback', level: 'retry' }, false)).toBe(false)
+  })
+
+  it('only applies to the feedback screen', () => {
+    expect(autoContinues({ name: 'userListening' }, false)).toBe(false)
+    expect(autoContinues({ name: 'processing' }, false)).toBe(false)
   })
 })

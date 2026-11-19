@@ -96,7 +96,7 @@ export default function ConversationGallery() {
           <label style={{ display: 'block' }}><input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} /> Debug overlay</label>
           <label style={{ display: 'block' }}><input type="checkbox" checked={animateMic} onChange={(e) => setAnimateMic(e.target.checked)} /> Animate mic level</label>
         </div>
-        <p style={{ marginTop: 16, color: '#555' }}>Buttons in the screen drive the real state machine; the list jumps straight to a state.</p>
+        <p style={{ marginTop: 16, color: '#555' }}>Buttons in the screen drive the real state machine; the list jumps straight to a state. In the live app, "feedback · excellent" moves on by itself after 2 s (no Continue button); here use the list to leave it.</p>
       </div>
 
       <div
@@ -116,6 +116,7 @@ export default function ConversationGallery() {
             micLevel={state.name === 'userSpeaking' ? level : state.name === 'userListening' ? level * 0.4 : 0}
             playing={playing}
             showLiveTranscript={DEFAULT_TURN_CONFIG.showLiveTranscript}
+            autoContinue={state.name === 'feedback' && state.level === 'excellent'}
             onClose={() => setState(initialState)}
             onOpenTranscript={() => setSheetOpen(true)}
             onReplay={() => {
