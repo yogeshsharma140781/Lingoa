@@ -8,6 +8,7 @@ import { REACTION_FALLBACKS } from '../config'
 import { describeState, type ConversationState } from '../stateMachine'
 import type { AiLine, Evaluation, Hints } from '../types'
 import { Avatar, type AvatarProps } from './Avatar'
+import type { FacePose } from './AvatarFace'
 
 export type PlayTarget = 'hintAnswer' | 'hintStall' | 'alternative'
 
@@ -134,6 +135,25 @@ function revealCard(box: HTMLElement, first: HTMLElement, last: HTMLElement = fi
   box.scrollTo({ top: box.scrollTop + delta, behavior: reduce ? 'auto' : 'smooth' })
 }
 
+/** What her face does in each state. */
+function facePose(state: ConversationState): FacePose {
+  switch (state.name) {
+    case 'aiSpeaking':
+      return 'speaking'
+    case 'userListening':
+    case 'userSpeaking':
+    case 'userWaiting':
+    case 'hintShown':
+      return 'listening'
+    case 'processing':
+      return 'thinking'
+    case 'feedback':
+      return state.level === 'excellent' || state.level === 'good' ? 'happy' : 'concerned'
+    default:
+      return 'idle'
+  }
+}
+
 export function ConversationView(props: ConversationViewProps) {
   const {
     state, language, scenarioTitle, personaName, aiLine, showTranslation, evaluation, hints,
@@ -232,6 +252,7 @@ export function ConversationView(props: ConversationViewProps) {
         <Avatar
           ring={view.ring}
           listening={view.micOpen}
+          pose={facePose(state)}
           name={personaName}
           renderInner={props.renderAvatarInner}
           tappable={view.avatarTappable}

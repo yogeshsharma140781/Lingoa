@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { useStore, Improvement, Correction } from '../store'
 import { loadAppInfo } from '../appInfo'
 import { audioKey, cacheAudio, getCachedAudio } from './audioCache'
+import { beginPlayback, computeEnvelope, endPlayback } from '../conversation/voiceLevel'
 
 // API base URL - use full URL for iOS, relative for web
 export const getApiBase = () => {
@@ -161,6 +162,7 @@ function getAudioContext(): AudioContext {
 
 // Stop all audio immediately (for interruption)
 export function stopAllAudio() {
+  endPlayback()
   if (currentAudio) {
     currentAudio.pause()
     currentAudio.currentTime = 0
@@ -672,6 +674,14 @@ export function useApi() {
       const audioBlob = new Blob([audioArray], { type: 'audio/mp3' })
       const audioUrl = URL.createObjectURL(audioBlob)
 
+      // How loud the voice is moment by moment, so the avatar's mouth can follow it. It is only measured,
+      // never routed through, so it cannot change the sound. Capped so a slow device never delays the voice.
+      const envelope = await Promise.race([
+        computeEnvelope(audioBlob),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 400)),
+      ])
+      let voiceHandle = 0
+
       // Apply playback speed (10% slower for more natural pace)
       const playbackRate = getPlaybackRate(audioSpeed)
       
@@ -692,6 +702,7 @@ export function useApi() {
           let playbackStarted = false
 
           audio.onended = () => {
+            endPlayback(voiceHandle)
             setIsAiSpeaking(false)
             URL.revokeObjectURL(audioUrl)
             currentAudio = null
@@ -701,6 +712,7 @@ export function useApi() {
 
           audio.onerror = (e) => {
             console.error('[TTS] Audio error:', e)
+            endPlayback(voiceHandle)
             setIsAiSpeaking(false)
             URL.revokeObjectURL(audioUrl)
             currentAudio = null
@@ -713,6 +725,7 @@ export function useApi() {
               playbackStarted = true
               audio.play().then(() => {
                 console.log('[TTS] Audio playing via HTMLAudioElement')
+                voiceHandle = beginPlayback(envelope, () => audio.currentTime)
                 firePlaybackStart()
                 setAudioSilentMode(false)
               }).catch((err) => {
@@ -731,6 +744,7 @@ export function useApi() {
               playbackStarted = true
               audio.play().then(() => {
                 console.log('[TTS] Audio playing via HTMLAudioElement (delayed)')
+                voiceHandle = beginPlayback(envelope, () => audio.currentTime)
                 firePlaybackStart()
                 setAudioSilentMode(false)
               }).catch((err) => {
@@ -770,6 +784,7 @@ export function useApi() {
           
           await new Promise<void>((resolve) => {
             source.onended = () => {
+              endPlayback(voiceHandle)
               setIsAiSpeaking(false)
               URL.revokeObjectURL(audioUrl)
               resolve()
@@ -777,6 +792,8 @@ export function useApi() {
             
             try {
               source.start(0)
+              const startedAt = ctx.currentTime
+              voiceHandle = beginPlayback(envelope, () => (ctx.currentTime - startedAt) * playbackRate)
               firePlaybackStart()
               console.log(`[TTS] Playing via Web Audio API at ${playbackRate}x speed`)
             } catch (startError) {
@@ -797,6 +814,7 @@ export function useApi() {
             audio.preload = 'auto'
 
             audio.onended = () => {
+              endPlayback(voiceHandle)
               setIsAiSpeaking(false)
               URL.revokeObjectURL(audioUrl)
               currentAudio = null
@@ -805,6 +823,7 @@ export function useApi() {
 
             audio.onerror = (e) => {
               console.error('[TTS] Audio error:', e)
+              endPlayback(voiceHandle)
               setIsAiSpeaking(false)
               URL.revokeObjectURL(audioUrl)
               currentAudio = null
@@ -812,6 +831,7 @@ export function useApi() {
             }
 
             audio.play().then(() => {
+              voiceHandle = beginPlayback(envelope, () => audio.currentTime)
               firePlaybackStart()
               setAudioSilentMode(false)
             }).catch((err) => {
