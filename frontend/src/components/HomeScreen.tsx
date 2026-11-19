@@ -108,7 +108,7 @@ export function HomeScreen() {
             width={688}
             height={412}
             draggable={false}
-            className="block w-[min(76vw,300px)] h-auto select-none"
+            className="block w-[min(53vw,210px)] h-auto select-none"
           />
         </h1>
         <p className="lt-muted text-lg max-w-xs mb-8 leading-snug">
