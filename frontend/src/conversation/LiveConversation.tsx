@@ -33,6 +33,11 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const SNAPSHOT_AFTER_SILENCE = 0.7
 /** Fewer milliseconds of speech than this is not worth sending to the transcriber. */
 const MIN_SPEECH_MS = DEFAULT_TURN_CONFIG.minSpeechDuration * 1000
+/**
+ * Speech at least this long is a real attempt: if nothing usable comes back, tell the learner. (The speech timer
+ * includes a ~0.6 s tail after each burst, so 2200 is about 1.6 s of actual speaking.)
+ */
+const REAL_SPEECH_MS = 2200
 
 type Transcription = { text: string; detectedLanguage?: string | null } | null
 type Reply = { text: string; audio: string | null } | null
@@ -310,17 +315,28 @@ export function LiveConversation() {
     const transcribeMs = Math.round(performance.now() - startedAt)
     const text = transcription?.text?.trim() ?? ''
 
-    // Nothing usable (silence or noise): never turn that into an answer. Quietly listen again.
+    const reactions = REACTION_FALLBACKS[language] ?? REACTION_FALLBACKS.en
+
+    // Nothing usable came back. Never turn that into an answer.
     if (!text && !failed) {
       logTurn('')
       emptyTurnsRef.current += 1
       if (emptyTurnsRef.current >= 2) apiRef.current.logEvent('struggle_signal', { reason: 'no_speech_repeat', count: emptyTurnsRef.current, ui: 'v2' })
+      if (speechMs >= REAL_SPEECH_MS) {
+        // They clearly said something, but nothing usable came back: say so and offer another go, instead of
+        // silently starting over (which looks like the app swallowed what they said).
+        apiRef.current.logEvent('turn_failed', { stage: 'empty_transcript', speech_ms: speechMs, ui: 'v2' })
+        lastTranscriptRef.current = ''
+        replyRef.current = null
+        setEvaluation({ transcript: '', level: 'retry', reaction: reactions.retry, alternative: null, changedWords: [] })
+        send({ type: 'EVALUATION_READY', level: 'retry' })
+        return
+      }
+      // A blip of noise: quietly listen again, and give back the speaking time it was counted as.
       useStore.getState().incrementSpeakingTime(-turnSpeechMsRef.current)
       send({ type: 'TURN_DISCARDED' })
       return
     }
-
-    const reactions = REACTION_FALLBACKS[language] ?? REACTION_FALLBACKS.en
 
     // The server never answered: say so, and let them try again. Nothing was judged.
     if (failed) {

@@ -1672,27 +1672,24 @@ async def transcribe_audio(
                     # Mark as invalid so frontend knows this is a rejection, not just empty audio
                     is_valid = False
         
-        # Script mismatch check (legacy, but keep for safety)
-        # Only check for script mismatch if we forced a non-Latin language (Hindi, Chinese, etc.)
-        # For Latin languages, script mismatch shouldn't happen, so skip this check
-        if use_hint and hint_code not in latin_langs and _looks_like_wrong_script_for_latin(text):
-            print(f"[TRANSCRIBE] Wrong script despite hint={hint_code}, retrying auto-detect")
+        # Script check for a forced non-Latin language (Hindi, Chinese, Japanese, Korean): the transcript must
+        # be in that language's script. Only when it is NOT, try once more without the language forced.
+        # (This used to retry whenever the text WAS in the right script, because it reused the check for
+        # Latin-script languages, and then threw the good transcript away if the retry came back in
+        # Latin letters: valid Hindi sentences were sometimes returned as empty.)
+        if use_hint and hint_code not in latin_langs and text.strip() and not likely_in_target_language(text, hint_code):
+            print(f"[TRANSCRIBE] Not in the {hint_code} script despite the hint; retrying auto-detect: {text[:60]!r}")
             text2, detected2, used_hint2, metrics2 = await _transcribe_once(None)
             if _likely_no_speech(metrics2, text2) or is_known_hallucination(text2):
-                print(f"[TRANSCRIBE] Retry likely no speech or known hallucination (metrics={metrics2}, text={text2[:80]!r}); treating transcript as empty")
                 text2 = ""
-            # Only use auto-detect result if it's valid for target language
-            if text2 and not _looks_like_wrong_script_for_latin(text2):
-                detected2_normalized = normalize_lang_code(detected2) if detected2 else None
-                # Validate that detected language matches target, or at least text is valid
-                if (detected2_normalized == hint_code or not detected2_normalized) and likely_in_target_language(text2, hint_code):
-                    text, detected, used_hint = text2, detected2, used_hint2
-                else:
-                    print(f"[TRANSCRIBE] Auto-detect from script check failed (detected={detected2_normalized}, expected={hint_code})")
-                    text = ""  # Reject wrong language
-                    # Mark as invalid so frontend knows this is a rejection, not just empty audio
-                    is_valid = False
-        
+            detected2_normalized = normalize_lang_code(detected2) if detected2 else None
+            if text2 and likely_in_target_language(text2, hint_code) and (detected2_normalized == hint_code or not detected2_normalized):
+                text, detected, used_hint = text2, detected2, used_hint2
+            else:
+                print(f"[TRANSCRIBE] Still not {hint_code} (detected={detected2_normalized}); rejecting")
+                text = ""
+                is_valid = False
+
         # Final validity check: is this transcript plausible for the target language?
         target_code = normalize_lang_code(hint_code or language)
         # Only reset is_valid if text is not empty - if text was set to empty earlier, keep is_valid as False
