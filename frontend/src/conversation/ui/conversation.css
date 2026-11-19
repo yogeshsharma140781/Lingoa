@@ -125,6 +125,7 @@
   overflow: hidden;
 }
 .conv-avatar-name { font-size: 1.0625em; line-height: 1; }
+.conv-avatar-face { width: 100%; height: 100%; object-fit: contain; transform: scale(1.1); user-select: none; pointer-events: none; }
 .conv-avatar-label {
   margin-top: 12px;
   min-height: 1.2em; /* reserved so nothing moves when the label changes */
