@@ -233,11 +233,11 @@
   display: block;
   width: 4px;
   border-radius: 2px;
-  background: #111;
+  background: var(--brand, #e2601c);
   transition: height 90ms linear;
 }
 .conv-dots { display: flex; gap: 6px; height: 52px; align-items: center; }
-.conv-dots i { width: 5px; height: 5px; border-radius: 50%; background: #111; }
+.conv-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--brand, #e2601c); }
 
 .conv-hint-btn {
   margin-top: 22px;
@@ -316,7 +316,7 @@
   background: var(--brand, #e2601c);
   color: #fff;
   font: inherit;
-  font-size: 1.1875em; /* bold and 19px+: "large text" for the contrast rule */
+  font-size: 1.1875rem; /* the same as every other primary button (.lt-primary) */
   font-weight: 700;
   cursor: pointer;
 }
@@ -337,7 +337,7 @@
 /* ---- processing ---- */
 .conv-processing { display: flex; gap: 8px; height: 52px; align-items: center; }
 .conv-processing i {
-  width: 8px; height: 8px; border-radius: 50%; background: #111;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--brand, #e2601c);
   animation: conv-bounce 1s infinite ease-in-out;
 }
 .conv-processing i:nth-child(2) { animation-delay: 0.15s; }
