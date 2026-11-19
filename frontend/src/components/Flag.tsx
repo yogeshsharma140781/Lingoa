@@ -19,5 +19,5 @@ const FLAGS: Record<string, string> = {
 export function Flag({ code, className = 'w-8' }: { code: string; className?: string }) {
   const src = FLAGS[code]
   if (!src) return null
-  return <img src={src} alt="" draggable={false} className={`${className} aspect-[4/3] rounded-[4px] object-cover shadow-sm ring-1 ring-white/10`} />
+  return <img src={src} alt="" draggable={false} className={`${className} aspect-[4/3] rounded-[4px] object-cover border border-[#d4d4d4]`} />
 }
