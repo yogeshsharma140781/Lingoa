@@ -313,13 +313,14 @@
   min-height: 50px;
   border: 0;
   border-radius: 25px;
-  background: #4d4d4d;
+  background: var(--brand, #e2601c);
   color: #fff;
   font: inherit;
-  font-size: 1em;
-  font-weight: 500;
+  font-size: 1.1875em; /* bold and 19px+: "large text" for the contrast rule */
+  font-weight: 700;
   cursor: pointer;
 }
+.conv-primary:active { background: var(--brand-pressed, #c2410c); }
 .conv-text-btn {
   min-height: 44px;
   padding: 0 20px;

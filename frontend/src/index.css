@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 :root {
+  /* The one brand colour in the UI: main action buttons, in the logo's orange. White on it is ~3.5:1,
+     which meets the 3:1 rule for large text only, so the button labels are bold and 19px+
+     (WCAG "large text"). Do not use this colour behind small or regular-weight white text. */
+  --brand: #e2601c;
+  --brand-pressed: #c2410c;
   --color-primary: #ed7424;
   --color-accent: #22c563;
   --color-surface: #1c1917;
@@ -194,10 +199,10 @@ button.lt-card:active, a.lt-card:active { background: #f2f2f2; }
 .lt-primary {
   display: flex; align-items: center; justify-content: center; gap: 10px;
   width: 100%; min-height: 56px; padding: 0 24px; border: 0; border-radius: 28px;
-  background: #4d4d4d; color: #ffffff; font-size: 1.0625rem; font-weight: 500; cursor: pointer;
+  background: var(--brand); color: #ffffff; font-size: 1.1875rem; font-weight: 700; cursor: pointer;
   transition: background-color 120ms ease, opacity 120ms ease;
 }
-.lt-primary:active { background: #333333; }
+.lt-primary:active { background: var(--brand-pressed); }
 .lt-primary:disabled { background: #c4c4c4; color: #ffffff; cursor: not-allowed; } /* not opacity: motion buttons set their own */
 .lt-secondary {
   display: flex; align-items: center; justify-content: center; gap: 8px;

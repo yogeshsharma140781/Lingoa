@@ -77,7 +77,7 @@ export function NotificationPrompt({ onDismiss }: { onDismiss: () => void }) {
           </button>
           <button
             onClick={handleEnable}
-            className="lt-primary flex-1 !min-h-[48px] !text-base"
+            className="lt-primary flex-1 !min-h-[48px]"
           >
             Enable
           </button>
