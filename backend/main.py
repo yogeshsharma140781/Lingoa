@@ -11,7 +11,7 @@ import uuid
 import random
 import re
 from datetime import datetime
-from typing import Optional, AsyncGenerator, List
+from typing import Optional, AsyncGenerator, List, Literal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -782,6 +782,58 @@ async def start_session(data: SessionStart):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to start session: {str(e)}")
 
+class ResumeMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class SessionResume(BaseModel):
+    """Everything needed to bring a conversation back after the server forgot it."""
+    session_id: str
+    user_id: str
+    target_language: str = "es"
+    topic: str = "random"
+    roleplay_id: Optional[str] = None
+    custom_scenario: Optional[str] = None
+    messages: List[ResumeMessage] = []
+
+    model_config = {"extra": "forbid"}
+
+
+@app.post("/api/session/resume")
+async def resume_session(data: SessionResume):
+    """
+    Sessions live in the server's memory, so a restart (every deploy) forgets conversations that are in
+    progress. The app keeps the conversation itself and sends it back here, under the same session id,
+    so the learner's conversation simply carries on. Does nothing if the session still exists.
+    """
+    if data.session_id in sessions:
+        return {"restored": False}
+    if not data.session_id or len(data.session_id) > 64:
+        raise HTTPException(status_code=400, detail="Bad session id")
+
+    # Only the recent part matters (replies look at the last 10 messages); bound what we accept.
+    messages = [
+        {"role": m.role, "content": m.content[:2000]}
+        for m in data.messages[-40:]
+        if m.content.strip()
+    ]
+    sessions[data.session_id] = {
+        "id": data.session_id,
+        "user_id": data.user_id,
+        "target_language": data.target_language,
+        "topic": data.topic,
+        "roleplay_id": data.roleplay_id or None,
+        "custom_scenario": data.custom_scenario or None,
+        "started_at": datetime.now().isoformat(),
+        "messages": messages,
+        "user_utterances": [m["content"] for m in messages if m["role"] == "user"],
+        "completed": False,
+    }
+    print(f"[SESSION RESUME] {data.session_id} lang={data.target_language} messages={len(messages)}")
+    return {"restored": True}
+
+
 @app.post("/api/session/end")
 async def end_session(data: SessionEnd):
     """End a session and generate feedback"""
@@ -1069,8 +1121,8 @@ async def evaluate_answer(data: EvaluateRequest):
     """
     Judge what the learner just said, for the conversation screen.
     Returns {level, alternative, changed_words}. `alternative` is a minimal edit of the
-    learner's own sentence, never a rewrite. Always answers 200: if the model fails the
-    answer counts as "good" with nothing to change, so the conversation keeps moving.
+    learner's own sentence, never a rewrite. If the model fails the answer counts as "good" with
+    nothing to change, so the conversation keeps moving. An unknown session is a 404 (see /api/session/resume).
     """
     transcript = (data.transcript or "").strip()
     fallback = {"level": "good", "alternative": None, "changed_words": []}
@@ -1079,7 +1131,9 @@ async def evaluate_answer(data: EvaluateRequest):
 
     session = sessions.get(data.session_id)
     if not session:
-        return fallback
+        # The server restarted (a deploy) and forgot this conversation. Say so, rather than answering
+        # a made-up "good": the app then restores the session and asks again.
+        raise HTTPException(status_code=404, detail="Session not found")
 
     messages = session.get("messages", [])
     last_ai = next((m["content"] for m in reversed(messages) if m.get("role") == "assistant"), "")
@@ -1124,7 +1178,7 @@ async def conversation_hints(data: HintsRequest):
     """
     session = sessions.get(data.session_id)
     if not session:
-        return {"answer": "", "stall": ""}
+        raise HTTPException(status_code=404, detail="Session not found")
 
     target_language = session.get("target_language", "en")
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")

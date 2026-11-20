@@ -86,7 +86,12 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     isAiSpeakingRef.current = isAiSpeaking
   }, [isAiSpeaking])
 
+  // Counts every start and every release, so a start that is still waiting for the microphone when the
+  // mic is released (e.g. Replay was tapped) knows it is out of date and gives the microphone back.
+  const startSeqRef = useRef(0)
+
   const startRecording = useCallback(async () => {
+    const seq = ++startSeqRef.current
     // Clean up any existing recording first
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
@@ -114,6 +119,12 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
         }
       })
       
+      if (seq !== startSeqRef.current) {
+        // The mic was released while it was still opening: do not let it come on now (it would cut
+        // into audio that has started playing in the meantime).
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
       setMicPermission('granted')
       streamRef.current = stream
 
@@ -229,6 +240,15 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     setIsSpeaking(false)
     isSpeakingRef.current = false
   }, [setIsSpeaking])
+
+  // Switch the microphone off completely (not just pause the recorder). While the microphone is held,
+  // iOS keeps its voice processing on, which makes everything the app plays quieter, and opening or
+  // closing it in the middle of a sound can cut that sound short.
+  const releaseMic = useCallback(() => {
+    startSeqRef.current++
+    stopRecording()
+    cleanupMedia()
+  }, [stopRecording, cleanupMedia])
 
   // Reliable stop + blob retrieval (waits for MediaRecorder to flush final chunk).
   const stopRecordingAndGetBlob = useCallback(async (): Promise<Blob | null> => {
@@ -539,6 +559,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     volume,
     startRecording,
     stopRecording,
+    releaseMic,
     stopRecordingAndGetBlob,
     getSnapshotBlob,
     getRecordedBlob,

@@ -30,6 +30,7 @@ const nowSec = () => performance.now() / 1000
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 /** After this much silence following speech, transcribe what was said so far (to judge whether the sentence is finished). */
+const MIC_SETTLE_MS = 150 // after the microphone is released, before a sound is played
 const SNAPSHOT_AFTER_SILENCE = 0.7
 /** Fewer milliseconds of speech than this is not worth sending to the transcriber. */
 const MIN_SPEECH_MS = DEFAULT_TURN_CONFIG.minSpeechDuration * 1000
@@ -107,7 +108,7 @@ export function LiveConversation() {
   const translationCacheRef = useRef<Map<string, string>>(new Map())
 
   // ---- the voice detector ----
-  const { volume, startRecording, stopRecording, stopRecordingAndGetBlob, getSnapshotBlob } = useVoiceActivity({
+  const { volume, startRecording, releaseMic, stopRecordingAndGetBlob, getSnapshotBlob } = useVoiceActivity({
     silenceTimeout: 600,
     onFrame: ({ voiced }) => {
       if (!micOnRef.current) return
@@ -163,8 +164,8 @@ export function LiveConversation() {
     if (!micOnRef.current) return
     micOnRef.current = false
     takerRef.current.close()
-    stopRecording()
-  }, [stopRecording])
+    releaseMic() // fully off, not just paused: see releaseMic
+  }, [releaseMic])
 
   // The mic follows the screen state: open while listening/speaking/waiting/hint, closed otherwise.
   // (The turn that just ended stops its own recording: see submitTurn.)
@@ -489,7 +490,7 @@ export function LiveConversation() {
     closingRef.current = true
     micOnRef.current = false
     takerRef.current.close()
-    stopRecording()
+    releaseMic()
     stopAllAudio()
     const s = useStore.getState()
     const st = stateRef.current.name
@@ -530,7 +531,7 @@ export function LiveConversation() {
         })
         .catch((err) => console.error('Error ending session:', err))
     }
-  }, [stopRecording])
+  }, [releaseMic])
 
   const goBack = useCallback(() => {
     const s = useStore.getState()
@@ -538,16 +539,22 @@ export function LiveConversation() {
     s.setScreen('home')
   }, [])
 
+  const replayIdRef = useRef(0)
   const onReplay = useCallback(async () => {
     const name = stateRef.current.name
     const text = lastAiTextRef.current
     if (!text) return
-    if (name === 'userListening' || name === 'userWaiting' || name === 'hintShown') {
+    const micWasOpen = micOnRef.current
+    if (name === 'userListening' || name === 'userWaiting' || name === 'hintShown' || name === 'resting') {
+      const id = ++replayIdRef.current
       apiRef.current.logEvent('ai_replayed', { ui: 'v2' })
       closeMic()
       send({ type: 'AI_AUDIO_STARTED' })
+      // Give the phone a moment to go from "recording" back to "playing", or the start can be cut off or quiet.
+      if (micWasOpen) await sleep(MIC_SETTLE_MS)
       await apiRef.current.textToSpeech(text)
-      if (!closingRef.current) send({ type: 'AI_AUDIO_ENDED' })
+      // (If another replay started meanwhile, that one hands the turn back.)
+      if (!closingRef.current && replayIdRef.current === id) send({ type: 'AI_AUDIO_ENDED' })
     } else if (name === 'feedback') {
       apiRef.current.logEvent('ai_replayed', { ui: 'v2' })
       await apiRef.current.textToSpeech(text)
@@ -597,6 +604,7 @@ export function LiveConversation() {
     closeMic()
     setPlaying(target)
     try {
+      if (reopen) await sleep(MIC_SETTLE_MS)
       await apiRef.current.textToSpeech(text)
     } finally {
       setPlaying(null)

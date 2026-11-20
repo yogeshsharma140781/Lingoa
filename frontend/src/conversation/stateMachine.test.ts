@@ -48,6 +48,7 @@ describe('waiting, hints and resting', () => {
     expect(run({ name: 'userWaiting' }, { type: 'RESTING_TIMEOUT' }).name).toBe('resting')
     expect(run({ name: 'hintShown' }, { type: 'RESTING_TIMEOUT' }).name).toBe('resting')
     expect(run({ name: 'resting' }, { type: 'TAP_AVATAR' }).name).toBe('userListening')
+    expect(run({ name: 'resting' }, { type: 'AI_AUDIO_STARTED' }).name).toBe('aiSpeaking') // Replay
   })
 
   it('Replay (AI audio starting again) interrupts listening, waiting and hint, then listening resumes', () => {

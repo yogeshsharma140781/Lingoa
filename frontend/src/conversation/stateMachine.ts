@@ -70,6 +70,7 @@ export function transition(state: ConversationState, event: ConversationEvent): 
 
     case 'resting':
       if (event.type === 'TAP_AVATAR') return { name: 'userListening' }
+      if (event.type === 'AI_AUDIO_STARTED') return { name: 'aiSpeaking' } // Replay
       return state
 
     case 'processing':

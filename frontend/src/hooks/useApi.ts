@@ -4,6 +4,7 @@ import { useStore, Improvement, Correction } from '../store'
 import { loadAppInfo } from '../appInfo'
 import { audioKey, cacheAudio, getCachedAudio } from './audioCache'
 import { beginPlayback, computeEnvelope, endPlayback } from '../conversation/voiceLevel'
+import { messagesForResume, withSessionRecovery } from '../conversation/sessionResume'
 
 // API base URL - use full URL for iOS, relative for web
 export const getApiBase = () => {
@@ -46,6 +47,10 @@ const TTS_PLAYBACK_CAP_MS = 60000    // a spoken reply is never this long; stop 
 
 // Module-level audio tracking for interruptibility
 let currentAudio: HTMLAudioElement | null = null
+let currentSource: AudioBufferSourceNode | null = null
+// Finishes the playback that is being awaited. Stopping a sound must also end the wait for it, or the
+// caller hangs until the 60 s safety stop, which would then cut off whatever plays by that time.
+let finishPlayback: (() => void) | null = null
 let audioUrls: string[] = [] // Track URLs for cleanup
 // (Removed) thinking filler audio ("hmm...", etc.)
 
@@ -168,6 +173,15 @@ export function stopAllAudio() {
     currentAudio.currentTime = 0
     currentAudio = null
   }
+  if (currentSource) {
+    const source = currentSource
+    currentSource = null
+    source.onended = null
+    try { source.stop() } catch { /* already stopped */ }
+  }
+  const finish = finishPlayback
+  finishPlayback = null
+  finish?.()
   // Cleanup URLs
   audioUrls.forEach(url => URL.revokeObjectURL(url))
   audioUrls = []
@@ -460,6 +474,40 @@ export function useApi() {
     }
   }, [targetLanguage])
 
+  // The server keeps conversations in memory, so a restart (every deploy) makes it forget one in progress.
+  // The app has the whole conversation: hand it back under the same session id and carry on.
+  const restoreSession = useCallback(async (pendingUserText?: string): Promise<boolean> => {
+    if (!sessionId) return false
+    try {
+      const isRoleplay = selectedRoleplayId !== null || customScenario !== null
+      const res = await fetchWithTimeout(`${API_BASE}/session/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId,
+          target_language: targetLanguage,
+          topic: isRoleplay ? 'roleplay' : (selectedTopic || 'random'),
+          roleplay_id: selectedRoleplayId || null,
+          custom_scenario: customScenario || null,
+          messages: messagesForResume(useStore.getState().conversationHistory, pendingUserText),
+        }),
+      }, 15000)
+      console.log('[API] Session restored after the server forgot it:', res.ok)
+      return res.ok
+    } catch (err) {
+      console.error('[API] Could not restore the session:', err)
+      return false
+    }
+  }, [sessionId, userId, targetLanguage, selectedTopic, selectedRoleplayId, customScenario])
+
+  /** Send a request; if the server says it does not know the session, restore it and send once more. */
+  const sendWithRecovery = useCallback(
+    (send: () => Promise<Response>, pendingUserText?: string): Promise<Response> =>
+      withSessionRecovery(send, () => restoreSession(pendingUserText)),
+    [restoreSession],
+  )
+
   // Get AI response (streaming)
   // Returns the reply text and, when asked for, the spoken version (base64 mp3) that the server
   // generates right behind the text on the same stream. onFinalText fires the moment the complete
@@ -472,7 +520,7 @@ export function useApi() {
     if (!sessionId) return null
 
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/conversation/respond`, {
+      const res = await sendWithRecovery(() => fetchWithTimeout(`${API_BASE}/conversation/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -489,7 +537,7 @@ export function useApi() {
           detected_language: detectedLanguage ?? null,
           tts_speed: options?.withVoice ? getActualSpeed(audioSpeed, targetLanguage) : undefined,
         }),
-      }, RESPOND_TIMEOUT_MS)
+      }, RESPOND_TIMEOUT_MS), transcript)
 
       if (!res.ok) return null
 
@@ -582,7 +630,7 @@ export function useApi() {
       console.error('AI response error:', err)
     }
     return null
-  }, [sessionId, appendAiMessage, setCurrentTranslation, setAiMessage, currentTranslation, audioSpeed, targetLanguage])
+  }, [sessionId, sendWithRecovery, appendAiMessage, setCurrentTranslation, setAiMessage, currentTranslation, audioSpeed, targetLanguage])
 
   // Text to speech - uses regular TTS endpoint (handles ElevenLabs/OpenAI fallback server-side)
   // onPlaybackStart fires once, the moment audio is actually audible (used to time how long users wait).
@@ -692,6 +740,7 @@ export function useApi() {
         await unlockAudio().catch(err => console.warn('[TTS] Audio unlock warning:', err))
         
         await new Promise<void>((resolve) => {
+          finishPlayback = () => { URL.revokeObjectURL(audioUrl); resolve() }
           const audio = new Audio(audioUrl)
           currentAudio = audio
           audio.playbackRate = playbackRate  // Apply speed control
@@ -783,6 +832,8 @@ export function useApi() {
           source.connect(ctx.destination)
           
           await new Promise<void>((resolve) => {
+            finishPlayback = () => { URL.revokeObjectURL(audioUrl); resolve() }
+            currentSource = source
             source.onended = () => {
               endPlayback(voiceHandle)
               setIsAiSpeaking(false)
@@ -807,6 +858,7 @@ export function useApi() {
           console.log('[TTS] Web Audio failed, trying HTMLAudioElement:', webAudioError)
           
           await new Promise<void>((resolve) => {
+            finishPlayback = () => { URL.revokeObjectURL(audioUrl); resolve() }
             const audio = new Audio(audioUrl)
             currentAudio = audio
             audio.playbackRate = playbackRate
@@ -994,11 +1046,11 @@ export function useApi() {
   } | null> => {
     if (!sessionId) return null
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/conversation/evaluate`, {
+      const res = await sendWithRecovery(() => fetchWithTimeout(`${API_BASE}/conversation/evaluate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, transcript }),
-      }, 12000)
+      }, 12000))
       if (!res.ok) return null
       const data = await res.json()
       if (!['excellent', 'good', 'almost', 'retry'].includes(data?.level)) return null
@@ -1011,17 +1063,17 @@ export function useApi() {
       console.error('Evaluate error:', err)
       return null
     }
-  }, [sessionId])
+  }, [sessionId, sendWithRecovery])
 
   // Two hints for the AI's last line: an answer and a phrase for buying time.
   const getHints = useCallback(async (): Promise<{ answer: string; stall: string } | null> => {
     if (!sessionId) return null
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/conversation/hints`, {
+      const res = await sendWithRecovery(() => fetchWithTimeout(`${API_BASE}/conversation/hints`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId }),
-      }, 12000)
+      }, 12000))
       if (res.ok) {
         const data = await res.json()
         const stall = typeof data?.stall === 'string' ? data.stall.trim() : ''
@@ -1042,7 +1094,7 @@ export function useApi() {
       console.error('Hints error:', err)
       return null
     }
-  }, [sessionId])
+  }, [sessionId, sendWithRecovery])
 
   return {
     fetchUserStats,
