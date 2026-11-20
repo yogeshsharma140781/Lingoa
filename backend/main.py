@@ -1072,13 +1072,27 @@ def clean_evaluation(parsed: dict, transcript: str, language: str = "en") -> dic
     }
 
 
+def unshout(text: str) -> str:
+    """Speech recognition sometimes returns a whole sentence in CAPITALS. Show and judge it as a normal sentence."""
+    t = (text or "").strip()
+    letters = [c for c in t if c.isalpha()]
+    if len(letters) >= 3 and t == t.upper() and t != t.lower():
+        t = t.lower()
+        return t[0].upper() + t[1:]
+    return t
+
+
 def evaluation_system_prompt(target_name: str) -> str:
     """The instructions for judging one spoken answer. Kept in a function so it can be tested as it is used."""
     prompt = (
         f"You are a careful, kind {target_name} teacher. A learner just said ONE sentence out loud. "
         "Decide how a native speaker would have said it, and compare.\n\n"
         "The text comes from speech recognition: ignore punctuation, capital letters and spelling that only "
-        "sounds the same. Never blame the learner for recognition errors.\n\n"
+        "sounds the same. Never blame the learner for recognition errors.\n"
+        "Speech recognition also hears the wrong WORD when two words sound alike (Dutch \"klaas\" for \"glas\", "
+        "\"bier\" for \"beer\"). If one or two words make no sense here but a similar-sounding word would fit the "
+        "situation, assume the learner said that word: judge the sentence as if they had, and do not use \"retry\" "
+        "for it. Use \"almost\" and give the sentence with the fitting word as the alternative, so they see it.\n\n"
         "SPELLING IS NOT THE LEARNER'S: the text was written by a machine, so spelling varies, above all in Hindi. "
         "NEVER treat as a mistake, and NEVER write an alternative that differs only by: a spelling variant "
         "(for example Hindi दीजिये / दीजिए, आयी / आई, कहाँ / कहा, बाज़ार / बाजार), a nukta, a chandrabindu or anusvara, "
@@ -1094,8 +1108,8 @@ def evaluation_system_prompt(target_name: str) -> str:
         '- "good": understandable and mostly right, but a teacher would still change something small: a missing '
         "article or small word, a blunt or unnatural phrasing, a missing politeness word, word order, a wrong preposition.\n"
         '- "almost": the meaning is clear but there are real mistakes: wrong verb form, wrong word, wrong gender, broken grammar.\n'
-        f'- "retry": cannot be understood, does not answer the question, is mostly not {target_name}, '
-        "or is cut off so much it means nothing.\n\n"
+        f'- "retry": only when the answer as a whole cannot be understood, has nothing to do with the question, is mostly not {target_name}, '
+        "or is cut off so much it means nothing. A sensible answer with a mistake or a misheard word is never \"retry\".\n\n"
         'Important: if you would write the sentence even slightly differently, it is NOT "excellent". '
         'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve. '
         "But leaving out a subject pronoun where native speakers do (Hindi, Spanish, Italian, Japanese...) is natural, not a mistake.\n\n"
@@ -1124,7 +1138,7 @@ async def evaluate_answer(data: EvaluateRequest):
     learner's own sentence, never a rewrite. If the model fails the answer counts as "good" with
     nothing to change, so the conversation keeps moving. An unknown session is a 404 (see /api/session/resume).
     """
-    transcript = (data.transcript or "").strip()
+    transcript = unshout(data.transcript)
     fallback = {"level": "good", "alternative": None, "changed_words": []}
     if not transcript:
         return {"level": "retry", "alternative": None, "changed_words": []}
@@ -1733,6 +1747,8 @@ async def transcribe_audio(
                 "valid_for_target": False
             }
         
+        text = unshout(text)
+
         # Validation: if we forced a language, the transcript MUST be in that language.
         # If it's not, Whisper ignored our constraint - reject it and retry with stronger enforcement.
         if use_hint and text:
