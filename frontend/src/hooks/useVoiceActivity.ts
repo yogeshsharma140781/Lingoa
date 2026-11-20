@@ -132,6 +132,17 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
 
       // Setup audio analysis
       audioContextRef.current = new AudioContext()
+      // A new audio context can start paused (iOS); a paused one reads silence, so nothing would ever be heard.
+      if (audioContextRef.current.state !== 'running') {
+        await Promise.race([
+          audioContextRef.current.resume().catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 1000)),
+        ])
+        if (seq !== startSeqRef.current) {
+          stream.getTracks().forEach(track => track.stop())
+          return
+        }
+      }
       analyserRef.current = audioContextRef.current.createAnalyser()
       analyserRef.current.fftSize = 256
       analyserRef.current.smoothingTimeConstant = 0.8
