@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { useStore, Improvement, Correction } from '../store'
 import { loadAppInfo } from '../appInfo'
 import { audioKey, cacheAudio, getCachedAudio } from './audioCache'
-import { beginPlayback, computeEnvelope, endPlayback } from '../conversation/voiceLevel'
+import { beginPlayback, computeEnvelope, endPlayback, setPlaybackEnvelope } from '../conversation/voiceLevel'
 import { messagesForResume, withSessionRecovery } from '../conversation/sessionResume'
 
 // API base URL - use full URL for iOS, relative for web
@@ -724,11 +724,14 @@ export function useApi() {
 
       // How loud the voice is moment by moment, so the avatar's mouth can follow it. It is only measured,
       // never routed through, so it cannot change the sound. Capped so a slow device never delays the voice.
-      const envelope = await Promise.race([
-        computeEnvelope(audioBlob),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 400)),
-      ])
+      // It is measured while the voice starts: the mouth uses a stand-in for the first instant, then the real thing.
+      const envelopePromise = computeEnvelope(audioBlob)
+      let envelope: Float32Array | null = null
       let voiceHandle = 0
+      envelopePromise.then((e) => {
+        envelope = e
+        if (voiceHandle) setPlaybackEnvelope(voiceHandle, e)
+      })
 
       // Apply playback speed (10% slower for more natural pace)
       const playbackRate = getPlaybackRate(audioSpeed)
@@ -736,8 +739,10 @@ export function useApi() {
       // On iOS, HTMLAudioElement is more reliable than Web Audio API
       // Use HTMLAudioElement as primary method on native platforms
       if (Capacitor.isNativePlatform()) {
-        // Ensure audio is unlocked before playing
-        await unlockAudio().catch(err => console.warn('[TTS] Audio unlock warning:', err))
+        // Unlock once. Playing through an <audio> element does not need the Web Audio context to be running, and
+        // after the microphone has been used iOS leaves that context "interrupted", which made every
+        // sound wait for the unlock to give up (up to ~2 s) before it played.
+        if (!audioUnlocked) await unlockAudio().catch(err => console.warn('[TTS] Audio unlock warning:', err))
         
         await new Promise<void>((resolve) => {
           finishPlayback = () => { URL.revokeObjectURL(audioUrl); resolve() }

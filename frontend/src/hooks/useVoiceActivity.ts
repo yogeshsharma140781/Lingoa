@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useStore } from '../store'
+import { Capacitor } from '@capacitor/core'
 import { stopAllAudio } from './useApi'
 
 interface UseVoiceActivityOptions {
@@ -113,7 +114,9 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
+          // On the iPhone app, echo cancellation switches on iOS's call-style audio processing, which turns the
+          // phone's volume down and delays whatever plays next. The mic is off while the AI speaks, so there is no echo to cancel.
+          echoCancellation: !Capacitor.isNativePlatform(),
           noiseSuppression: true,
           autoGainControl: true,
         }

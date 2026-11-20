@@ -73,6 +73,11 @@ export function beginPlayback(envelope: Float32Array | null, position: () => num
   return id
 }
 
+/** The measurement finished after the voice had already started. */
+export function setPlaybackEnvelope(id: number, envelope: Float32Array | null) {
+  if (active?.id === id) active.envelope = envelope
+}
+
 /** The voice stopped. With a handle, only ends that playback (not a newer one that already started). */
 export function endPlayback(id?: number) {
   if (id === undefined || active?.id === id) active = null
