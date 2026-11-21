@@ -1108,8 +1108,11 @@ def evaluation_system_prompt(target_name: str) -> str:
         '- "good": understandable and mostly right, but a teacher would still change something small: a missing '
         "article or small word, a blunt or unnatural phrasing, a missing politeness word, word order, a wrong preposition.\n"
         '- "almost": the meaning is clear but there are real mistakes: wrong verb form, wrong word, wrong gender, broken grammar.\n'
-        f'- "retry": only when the answer as a whole cannot be understood, has nothing to do with the question, is mostly not {target_name}, '
-        "or is cut off so much it means nothing. A sensible answer with a mistake or a misheard word is never \"retry\".\n\n"
+        f'- "retry": only when the answer as a whole cannot be understood, is mostly not {target_name}, '
+        "or is cut off so much it means nothing. An understandable answer in the target language is never \"retry\": "
+        "not when it has a mistake or a misheard word, and not when it does not really answer the question "
+        "(a greeting, a short or unrelated reply). For such a reply use \"good\" and give the sentence the way a "
+        "native speaker would say those same words (for a greeting, the natural greeting).\n\n"
         'Important: if you would write the sentence even slightly differently, it is NOT "excellent". '
         'Choose "good" and give the alternative. Do not be lenient just to be nice: the learner is here to improve. '
         "But leaving out a subject pronoun where native speakers do (Hindi, Spanish, Italian, Japanese...) is natural, not a mistake.\n\n"
@@ -1171,7 +1174,7 @@ async def evaluate_answer(data: EvaluateRequest):
             ],
             response_format={"type": "json_object"},
             max_tokens=160,
-            temperature=0.2,
+            temperature=0,  # the same answer should get the same verdict every time
         )
         parsed = json.loads(resp.choices[0].message.content or "{}")
     except Exception as e:
