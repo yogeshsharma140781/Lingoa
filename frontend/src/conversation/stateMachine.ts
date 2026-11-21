@@ -113,6 +113,8 @@ export interface StateView {
   indicatorCaption: string | null
   showHintButton: boolean
   showHintCard: boolean
+  /** "Done": the learner can end their turn now, without waiting for the silence (only while they are speaking). */
+  showDoneButton: boolean
   /** 'YOU SAID' block (feedback only). */
   showTranscript: boolean
   showContinue: boolean
@@ -134,6 +136,7 @@ const BASE: StateView = {
   indicatorCaption: null,
   showHintButton: false,
   showHintCard: false,
+  showDoneButton: false,
   showTranscript: false,
   showContinue: false,
   showRetry: false,
@@ -146,6 +149,14 @@ export function describeState(state: ConversationState): StateView {
     case 'aiSpeaking':
       return { ...BASE, ring: 'solid', avatarLabel: 'Speaking…', announcement: 'Speaking' }
     case 'userListening':
+      return {
+        ...BASE,
+        micOpen: true,
+        avatarLabel: 'Listening…',
+        indicator: 'waveform',
+        indicatorCaption: 'Say something…',
+        announcement: 'Listening',
+      }
     case 'userSpeaking':
       return {
         ...BASE,
@@ -153,6 +164,7 @@ export function describeState(state: ConversationState): StateView {
         avatarLabel: 'Listening…',
         indicator: 'waveform',
         indicatorCaption: 'Say something…',
+        showDoneButton: true,
         announcement: 'Listening',
       }
     case 'userWaiting':

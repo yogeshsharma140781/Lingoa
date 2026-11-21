@@ -237,7 +237,18 @@ export function LiveConversation() {
         break
     }
   }, [send])
-  const submitTurnRef = useRef<((reason: 'silence' | 'maxDuration') => Promise<void>) | null>(null)
+
+  // "Done": the learner ends their turn themselves instead of waiting for the silence. Same path as the
+  // silence ending. Ignored unless they are speaking, and for a blip too short to be words.
+  const onDone = useCallback(() => {
+    if (stateRef.current.name !== 'userSpeaking') return
+    if (turnSpeechMsRef.current < MIN_SPEECH_MS) return
+    micOnRef.current = false // submitTurn stops the recorder itself, to keep the audio
+    takerRef.current.close()
+    send({ type: 'TURN_ENDED' })
+    void submitTurnRef.current?.('manual')
+  }, [send])
+  const submitTurnRef = useRef<((reason: 'silence' | 'maxDuration' | 'manual') => Promise<void>) | null>(null)
 
   useEffect(() => {
     if (!started) return
@@ -261,7 +272,7 @@ export function LiveConversation() {
   handleTakerActionRef.current = handleTakerAction
 
   // ---- a finished turn: transcribe, judge, and get the next reply going ----
-  const submitTurn = useCallback(async (reason: 'silence' | 'maxDuration') => {
+  const submitTurn = useCallback(async (reason: 'silence' | 'maxDuration' | 'manual') => {
     const startedAt = performance.now()
     const speechMs = Math.round(turnSpeechMsRef.current)
     const turnIndex = turnIndexRef.current + 1
@@ -271,7 +282,7 @@ export function LiveConversation() {
     const logTurn = (text: string) => {
       const trimmed = text.trim()
       apiRef.current.logEvent('turn_submitted', {
-        trigger: reason === 'silence' ? 'auto' : 'max_duration',
+        trigger: reason === 'silence' ? 'auto' : reason === 'manual' ? 'done_button' : 'max_duration',
         turn_index: turnIndex,
         speech_ms: speechMs,
         silence_wait_ms: silenceWaitMs,
@@ -710,6 +721,7 @@ export function LiveConversation() {
         onToggleTranslate={onToggleTranslate}
         onTapAvatar={() => send({ type: 'TAP_AVATAR' })}
         onShowHint={onShowHint}
+        onDone={onDone}
         onPlay={onPlay}
         onContinue={onContinue}
         onTryAgain={onTryAgain}

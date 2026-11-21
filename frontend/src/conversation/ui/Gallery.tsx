@@ -140,6 +140,7 @@ export default function ConversationGallery() {
             onToggleTranslate={() => setShowTranslation((v) => !v)}
             onTapAvatar={() => fire({ type: 'TAP_AVATAR' })}
             onShowHint={() => fire({ type: 'SHOW_HINT' })}
+            onDone={() => fire({ type: 'TURN_ENDED' })}
             onPlay={play}
             onContinue={() => fire({ type: 'CONTINUE' })}
             onTryAgain={() => fire({ type: 'TRY_AGAIN' })}

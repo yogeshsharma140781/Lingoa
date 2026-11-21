@@ -40,6 +40,8 @@ export interface ConversationViewProps {
   onToggleTranslate: () => void
   onTapAvatar: () => void
   onShowHint: () => void
+  /** The learner is done speaking: end the turn now. */
+  onDone: () => void
   onPlay: (target: PlayTarget) => void
   onContinue: () => void
   onTryAgain: () => void
@@ -314,6 +316,15 @@ export function ConversationView(props: ConversationViewProps) {
 
         {showHintButton && (
           <button type="button" className="conv-hint-btn" onClick={props.onShowHint}>Show a hint</button>
+        )}
+
+        {view.showDoneButton && (
+          <button type="button" className="conv-done-btn" onClick={props.onDone}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            </svg>
+            Done
+          </button>
         )}
 
         {showHintCard && hints && (

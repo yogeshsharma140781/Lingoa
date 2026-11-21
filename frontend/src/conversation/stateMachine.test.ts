@@ -140,6 +140,15 @@ describe('describeState', () => {
     expect(view('hintShown').showHintCard).toBe(true)
   })
 
+  it('shows the Done button only while the learner is speaking, never together with the hint button', () => {
+    expect(STATE_NAMES.filter((n) => view(n).showDoneButton)).toEqual(['userSpeaking'])
+    for (const n of STATE_NAMES) expect(view(n).showDoneButton && view(n).showHintButton).toBe(false)
+  })
+
+  it('Done ends the turn through the same event as silence does', () => {
+    expect(transition({ name: 'userSpeaking' }, { type: 'TURN_ENDED' })).toEqual({ name: 'processing' })
+  })
+
   it('only resting makes the avatar tappable', () => {
     expect(STATE_NAMES.filter((n) => view(n).avatarTappable)).toEqual(['resting'])
     expect(view('resting').avatarLabel).toBe('Tap to continue')

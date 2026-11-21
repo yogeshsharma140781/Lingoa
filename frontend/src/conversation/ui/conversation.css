@@ -254,6 +254,23 @@
   cursor: pointer;
 }
 
+.conv-done-btn {
+  margin-top: 22px;
+  min-height: 44px;
+  padding: 0 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #f0b591;
+  border-radius: 22px;
+  background: #fbe3d3;
+  color: #8a3410;
+  font: inherit;
+  font-size: 0.875em;
+  font-weight: 500;
+  cursor: pointer;
+}
+
 .conv-card {
   width: 100%;
   margin-top: 22px;
