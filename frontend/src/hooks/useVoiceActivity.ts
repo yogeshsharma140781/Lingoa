@@ -35,7 +35,11 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const [volume, setVolume] = useState(0)
   
   const streamRef = useRef<MediaStream | null>(null)
+  // One audio context for the whole session, kept between turns. A new one made while the mic opens (not
+  // straight from a tap) can start paused on iOS, and a paused context reads silence for ever while the
+  // mic shows as on. This one is resumed on every tap instead (see the effect below).
   const audioContextRef = useRef<AudioContext | null>(null)
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -89,36 +93,53 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   // Counts every start and every release, so a start that is still waiting for the microphone when the
   // mic is released (e.g. Replay was tapped) knows it is out of date and gives the microphone back.
   const startSeqRef = useRef(0)
+  // Watchdog bookkeeping (see the effect below): the mic is supposed to be on, a start is in progress,
+  // the last time the microphone gave any signal, and the last restart.
+  const wantedRef = useRef(false)
+  const startingSinceRef = useRef(0)
+  const lastSignalAtRef = useRef(0)
+  const unhealthySinceRef = useRef(0)
+  const lastRestartAtRef = useRef(0)
+  const restartFailuresRef = useRef(0)
+  const silentRestartsRef = useRef(0) // restarts in a row that did not bring any signal back
+  const freshContextRef = useRef(false) // the next start must not reuse the audio context
+  const levelStatsRef = useRef({ max: -100, sum: 0, n: 0, loggedAt: 0 }) // for the [Mic] level log
 
   const startRecording = useCallback(async () => {
     const seq = ++startSeqRef.current
+    wantedRef.current = true
+    startingSinceRef.current = Date.now()
     // Clean up any existing recording first
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
     }
-    if (audioContextRef.current) {
-      // It may already be closed (iOS can close it itself after an interruption); closing twice throws,
-      // and that must not stop the microphone from opening again.
-      try {
-        if (audioContextRef.current.state !== 'closed') await audioContextRef.current.close()
-      } catch {
-        // ignore
-      }
-      audioContextRef.current = null
+    try {
+      sourceRef.current?.disconnect()
+    } catch {
+      // ignore
     }
+    sourceRef.current = null
+    // A context that iOS closed by itself cannot be reused: make a new one below.
+    if (audioContextRef.current?.state === 'closed') audioContextRef.current = null
 
     // Reset chunks
     chunksRef.current = []
     
     try {
+      // After the mic has delivered nothing but silence, every other retry asks for the plain default
+      // microphone instead (a different capture setup may work where this one is stuck).
+      const retries = silentRestartsRef.current
+      const plainMic = retries >= 2 && retries % 2 === 0
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // Keep this on: it also boosts the microphone level, which the speech detector's loudness
-          // threshold depends on (with it off, normal speech is not picked up on the iPhone).
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        }
+        audio: plainMic
+          ? true
+          : {
+              // Keep this on: it also boosts the microphone level, which the speech detector's loudness
+              // threshold depends on (with it off, normal speech is not picked up on the iPhone).
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
       })
       
       if (seq !== startSeqRef.current) {
@@ -130,25 +151,44 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       setMicPermission('granted')
       streamRef.current = stream
 
-      // Setup audio analysis
-      audioContextRef.current = new AudioContext()
-      // A new audio context can start paused (iOS); a paused one reads silence, so nothing would ever be heard.
-      if (audioContextRef.current.state !== 'running') {
-        await Promise.race([
-          audioContextRef.current.resume().catch(() => {}),
-          new Promise((resolve) => setTimeout(resolve, 1000)),
-        ])
+      // Setup audio analysis (reusing the session's audio context if there is one).
+      // On iOS a context whose sample rate differs from the microphone's can hear nothing but silence
+      // (the mic shows as on, the level reads exactly zero), so the context is built to match the mic,
+      // and is not reused if the mic's rate has changed or the last attempt heard only silence.
+      const micRate = stream.getAudioTracks()[0]?.getSettings?.().sampleRate
+      const old = audioContextRef.current
+      if (old && (freshContextRef.current || (micRate && old.sampleRate !== micRate))) {
+        old.close().catch(() => {})
+        audioContextRef.current = null
+      }
+      freshContextRef.current = false
+      if (!audioContextRef.current) {
+        try {
+          audioContextRef.current = micRate ? new AudioContext({ sampleRate: micRate }) : new AudioContext()
+        } catch {
+          audioContextRef.current = new AudioContext()
+        }
+      }
+      const ctx = audioContextRef.current
+      if (ctx.state !== 'running') {
+        // Paused (iOS can do that): resume, but never wait long.
+        await Promise.race([ctx.resume().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 1000))])
         if (seq !== startSeqRef.current) {
           stream.getTracks().forEach(track => track.stop())
           return
         }
       }
+      console.log(
+        '[Mic] opened; audio context:', ctx.state, 'track muted:', stream.getAudioTracks()[0]?.muted,
+        'rates ctx/mic:', ctx.sampleRate, micRate, plainMic ? '(plain mic)' : '',
+      )
       analyserRef.current = audioContextRef.current.createAnalyser()
       analyserRef.current.fftSize = 256
       analyserRef.current.smoothingTimeConstant = 0.8
 
       const source = audioContextRef.current.createMediaStreamSource(stream)
       source.connect(analyserRef.current)
+      sourceRef.current = source
 
       // Setup media recorder
       const pickMimeType = () => {
@@ -211,11 +251,17 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       episodeMaxRef.current = -100
       steadyWindowRef.current = []
       recordingStartedAtRef.current = Date.now()
+      lastSignalAtRef.current = Date.now()
+      unhealthySinceRef.current = 0
+      restartFailuresRef.current = 0
       analyzeAudio()
 
     } catch (err) {
       console.error('Microphone access error:', err)
       setMicPermission('denied')
+      restartFailuresRef.current += 1
+    } finally {
+      if (seq === startSeqRef.current) startingSinceRef.current = 0
     }
   }, [setMicPermission])
 
@@ -237,17 +283,20 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   }, [setIsSpeaking])
 
   const cleanupMedia = useCallback(() => {
+    wantedRef.current = false
     // Stop stream tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
     }
 
-    // Close audio context
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close()
-      audioContextRef.current = null
+    // The audio context stays (see audioContextRef); only the microphone is disconnected from it.
+    try {
+      sourceRef.current?.disconnect()
+    } catch {
+      // ignore
     }
+    sourceRef.current = null
 
     setIsRecording(false)
     setIsSpeaking(false)
@@ -259,6 +308,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   // closing it in the middle of a sound can cut that sound short.
   const releaseMic = useCallback(() => {
     startSeqRef.current++
+    startingSinceRef.current = 0
     stopRecording()
     cleanupMedia()
   }, [stopRecording, cleanupMedia])
@@ -383,6 +433,10 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
 
     // Calculate average volume
     const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+    if (average > 0) {
+      lastSignalAtRef.current = Date.now()
+      silentRestartsRef.current = 0
+    }
     const normalizedVolume = average / 255
     setVolume(normalizedVolume)
 
@@ -390,6 +444,10 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     const db = average > 0 ? 20 * Math.log10(average / 128) : -100
 
     const now = Date.now()
+    const stats = levelStatsRef.current
+    stats.max = Math.max(stats.max, db)
+    stats.sum += average
+    stats.n += 1
 
     // Read current values from refs to avoid stale closures
     const currentThreshold = silenceThresholdRef.current
@@ -548,6 +606,102 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
 
     animationFrameRef.current = requestAnimationFrame(analyzeAudio)
   }, [setIsSpeaking, onSpeechStart, onSpeechEnd]) // Removed stale-prone deps, using refs instead
+
+  // Watchdog. The microphone is opened once and then trusted, but iOS can take it away at any moment
+  // (a notification, a call, the screen locking, the app going to the background): the track ends or goes
+  // silent, nothing is heard any more, and the app waits for speech that can never arrive. So while the mic
+  // is meant to be on, check on it, and open it again when it has died.
+  useEffect(() => {
+    const SILENT_MS = 3000 // a live microphone is never digitally silent (exactly zero) for this long
+    const check = () => {
+      if (!wantedRef.current) return
+      const now = Date.now()
+      // A line every few seconds saying what the microphone is doing (for diagnosing a deaf mic).
+      const st = levelStatsRef.current
+      if (now - st.loggedAt >= 5000) {
+        if (st.loggedAt && st.n) {
+          console.log(
+            '[Mic] level avg', (st.sum / st.n).toFixed(1), 'max dB', st.max.toFixed(1),
+            'floor', noiseFloorRef.current.toFixed(1),
+            'ctx', audioContextRef.current?.state,
+            'track', streamRef.current?.getAudioTracks()[0]?.readyState,
+            'muted', streamRef.current?.getAudioTracks()[0]?.muted,
+          )
+        }
+        levelStatsRef.current = { max: -100, sum: 0, n: 0, loggedAt: now }
+      }
+      // A start that never finishes (getUserMedia can hang after an interruption): try again.
+      if (startingSinceRef.current) {
+        if (now - startingSinceRef.current < 8000) return
+        startingSinceRef.current = 0
+      }
+      const stream = streamRef.current
+      const track = stream?.getAudioTracks()[0]
+      const ctx = audioContextRef.current
+      if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {})
+
+      let reason: 'gone' | 'ended' | 'muted' | 'paused' | 'silent' | null = null
+      if (!stream || !track) reason = 'gone'
+      else if (track.readyState === 'ended') reason = 'ended'
+      else if (track.muted) reason = 'muted'
+      else if (!ctx || ctx.state !== 'running') reason = 'paused'
+      else if (now - lastSignalAtRef.current > SILENT_MS) reason = 'silent'
+
+      if (!reason) {
+        unhealthySinceRef.current = 0
+        return
+      }
+      if (!unhealthySinceRef.current) {
+        unhealthySinceRef.current = now
+        console.warn('[Mic] looks unhealthy:', reason, 'context:', ctx?.state, 'track:', track?.readyState, 'muted:', track?.muted)
+      }
+      // Gone, ended, or giving exact silence: dead, fix it at once. A muted track or a paused audio context
+      // sometimes recovers by itself (the context is being resumed above), so give those a few seconds.
+      const dead = reason === 'gone' || reason === 'ended' || reason === 'silent'
+      if (!dead && now - unhealthySinceRef.current < (reason === 'paused' ? 4000 : 5000)) return
+      if (now - recordingStartedAtRef.current < 4000) return // just opened: give it time to settle
+      if (isSpeakingRef.current) return // never cut in on someone who is talking
+      if (restartFailuresRef.current >= 5) return
+      // A mic that stays silent after several restarts is probably just a very quiet room: ease off.
+      const pace = reason === 'silent' && silentRestartsRef.current >= 4 ? 20000 : dead ? 3000 : 30000
+      if (now - lastRestartAtRef.current < pace) return
+      if (reason === 'silent') {
+        silentRestartsRef.current += 1
+        freshContextRef.current = true
+      }
+      lastRestartAtRef.current = now
+      unhealthySinceRef.current = 0
+      console.warn('[Mic] restarting the microphone:', reason)
+      if (reason === 'paused' && ctx) {
+        // Resuming did not work: start over with a new audio context.
+        ctx.close().catch(() => {})
+        audioContextRef.current = null
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = 0
+      }
+      void startRecording()
+    }
+    const id = window.setInterval(check, 1000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check()
+    }
+    // A tap is the one moment iOS always lets a paused audio context start again.
+    const onTap = () => {
+      const ctx = audioContextRef.current
+      if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {})
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    document.addEventListener('pointerdown', onTap, true)
+    document.addEventListener('touchend', onTap, true)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+      document.removeEventListener('pointerdown', onTap, true)
+      document.removeEventListener('touchend', onTap, true)
+    }
+  }, [startRecording])
 
   // Cleanup on unmount
   useEffect(() => {

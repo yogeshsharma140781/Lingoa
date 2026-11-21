@@ -1473,6 +1473,31 @@ def is_known_hallucination(text: str) -> bool:
     return any(marker in t for marker in KNOWN_HALLUCINATION_MARKERS)
 
 
+# Whisper often appends a broadcaster's subtitle credit ("... TV Gelderland 2021") to real speech, after
+# the trailing silence. Only the credit at the very end is removed, so the learner's own words survive.
+# (Anchored to the end and limited to named regional broadcasters, so an ordinary sentence that mentions
+# a year or "tv" is never touched.)
+_BROADCASTER = (
+    r"(?:\b(?:tv|rtv|omroep)\s+(?:gelderland|oost|noord|drenthe|rijnmond|utrecht|west|flevoland|brabant|fryslân|friesland|limburg|zeeland|holland)\b)"
+)
+_CREDIT_TAIL = re.compile(
+    # "... Ondertiteld door ..." and the like
+    r"[\s.,:;!?\-–—|]*\b(?:ondertiteld|ondertiteling|ondertitels)\b[^.!?]*\W*$"
+    # "<sentence>. TV GELDERLAND" (after a sentence break) or "... TV GELDERLAND 2021" (with a year)
+    r"|[.!?]\s*" + _BROADCASTER + r"(?:\s+(?:19|20)\d{2})?\W*$"
+    r"|[\s.,:;!?\-–—|]*" + _BROADCASTER + r"\s+(?:19|20)\d{2}\W*$",
+    re.IGNORECASE,
+)
+
+
+def strip_credit_tail(text: str) -> str:
+    """Remove a trailing broadcaster/subtitle credit that Whisper invented (see _CREDIT_TAIL)."""
+    if not text:
+        return text
+    stripped = _CREDIT_TAIL.sub("", text).strip()
+    return stripped
+
+
 # Hindi grammar words whose forms differ in meaning, not spelling (है / हैं / हूँ, रहा / रही ...). If the
 # respelling swaps one of these for another, that is the learner's grammar, not the machine's spelling.
 _HINDI_GRAMMAR_FORMS = {
@@ -1727,6 +1752,20 @@ async def transcribe_audio(
         # If Whisper ignores our language constraint and produces wrong-language text, we need to handle it.
         text, detected, used_hint, metrics = await _transcribe_once(hint_code if use_hint else None)
 
+        # A credit Whisper tacked on after the real words ("... TV GELDERLAND 2021"): keep the words.
+        # If nothing else is left, the whole transcript was invented, and the guard below drops it.
+        cleaned = strip_credit_tail(text)
+        if cleaned != text:
+            print(f"[TRANSCRIBE] Removed an invented credit from the end: {text[:80]!r} -> {cleaned[:80]!r}")
+            if not cleaned:
+                return {
+                    "transcript": "",
+                    "detected_language": detected,
+                    "used_hint": used_hint,
+                    "valid_for_target": False,
+                }
+            text = cleaned
+
         # Guard against Whisper hallucinations on silence/background noise.
         if _likely_no_speech(metrics, text) or is_known_hallucination(text) or implausible_for_speech_time(text, language, speech_ms):
             print(f"[TRANSCRIBE] Likely no speech or known hallucination (metrics={metrics}, speech_ms={speech_ms}, text={text[:80]!r}); treating transcript as empty")
@@ -1809,6 +1848,7 @@ async def transcribe_audio(
             if is_wrong_language:
                 print(f"[TRANSCRIBE] Retrying with auto-detect (forced {hint_code} failed)")
                 text2, detected2, used_hint2, metrics2 = await _transcribe_once(None)
+                text2 = strip_credit_tail(text2)
                 if _likely_no_speech(metrics2, text2) or is_known_hallucination(text2):
                     print(f"[TRANSCRIBE] Retry likely no speech or known hallucination (metrics={metrics2}, text={text2[:80]!r}); treating transcript as empty")
                     text2 = ""
