@@ -1,6 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useStore } from '../store'
 import { stopAllAudio } from './useApi'
+import { installMicTracker, liveMicStreamCount, stopStrayMicStreams } from './micTracker'
+
+installMicTracker()
 
 interface UseVoiceActivityOptions {
   silenceThreshold?: number
@@ -103,6 +106,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const restartFailuresRef = useRef(0)
   const silentRestartsRef = useRef(0) // restarts in a row that did not bring any signal back
   const freshContextRef = useRef(false) // the next start must not reuse the audio context
+  const lastDeviceIdRef = useRef<string | null>(null) // the input the last start used (to try another after silence)
   const levelStatsRef = useRef({ max: -100, sum: 0, n: 0, loggedAt: 0 }) // for the [Mic] level log
 
   const startRecording = useCallback(async () => {
@@ -130,8 +134,22 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       // microphone instead (a different capture setup may work where this one is stuck).
       const retries = silentRestartsRef.current
       const plainMic = retries >= 2 && retries % 2 === 0
+      // From the third silent restart on, also try a different input device, if the phone has another one
+      // (headphones, a second microphone): a dead input route is one thing a restart in place cannot fix.
+      let otherDevice: string | null = null
+      if (retries >= 2) {
+        try {
+          const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId)
+          const next = inputs.find((d) => d.deviceId !== lastDeviceIdRef.current && d.deviceId !== 'default')
+          if (next) otherDevice = next.deviceId
+        } catch {
+          // keep the default input
+        }
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: plainMic
+        audio: otherDevice
+          ? { deviceId: { exact: otherDevice } }
+          : plainMic
           ? true
           : {
               // Keep this on: it also boosts the microphone level, which the speech detector's loudness
@@ -178,9 +196,17 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
           return
         }
       }
+      const track0 = stream.getAudioTracks()[0]
+      lastDeviceIdRef.current = track0?.getSettings?.().deviceId ?? null
       console.log(
-        '[Mic] opened; audio context:', ctx.state, 'track muted:', stream.getAudioTracks()[0]?.muted,
-        'rates ctx/mic:', ctx.sampleRate, micRate, plainMic ? '(plain mic)' : '',
+        '[Mic] opened; audio context:', ctx.state, 'track muted:', track0?.muted,
+        'rates ctx/mic:', ctx.sampleRate, micRate, plainMic ? '(plain mic)' : '', otherDevice ? '(other device)' : '',
+        'input:', JSON.stringify(track0?.label ?? ''),
+      )
+      // Every input the phone offers right now, to see what iOS has connected (headphones, Bluetooth...).
+      navigator.mediaDevices.enumerateDevices().then(
+        (all) => console.log('[Mic] inputs:', JSON.stringify(all.filter((d) => d.kind === 'audioinput').map((d) => d.label || d.deviceId.slice(0, 6)))),
+        () => {},
       )
       analyserRef.current = audioContextRef.current.createAnalyser()
       analyserRef.current.fftSize = 256
@@ -311,6 +337,9 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     startingSinceRef.current = 0
     stopRecording()
     cleanupMedia()
+    // Nothing should be capturing now: stop any stream that slipped through (see micTracker).
+    const strays = stopStrayMicStreams(null)
+    if (strays) console.warn('[Mic] stopped', strays, 'stray microphone stream(s) on release')
   }, [stopRecording, cleanupMedia])
 
   // Reliable stop + blob retrieval (waits for MediaRecorder to flush final chunk).
@@ -653,7 +682,10 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       }
       if (!unhealthySinceRef.current) {
         unhealthySinceRef.current = now
-        console.warn('[Mic] looks unhealthy:', reason, 'context:', ctx?.state, 'track:', track?.readyState, 'muted:', track?.muted)
+        console.warn(
+          '[Mic] looks unhealthy:', reason, 'context:', ctx?.state, 'track:', track?.readyState, 'muted:', track?.muted,
+          'open capture streams:', liveMicStreamCount(),
+        )
       }
       // Gone, ended, or giving exact silence: dead, fix it at once. A muted track or a paused audio context
       // sometimes recovers by itself (the context is being resumed above), so give those a few seconds.
@@ -672,6 +704,9 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       lastRestartAtRef.current = now
       unhealthySinceRef.current = 0
       console.warn('[Mic] restarting the microphone:', reason)
+      // Any other open microphone stream has no owner: stop it (it may be what is blocking this one).
+      const strays = stopStrayMicStreams(streamRef.current)
+      if (strays) console.warn('[Mic] stopped', strays, 'stray microphone stream(s)')
       if (reason === 'paused' && ctx) {
         // Resuming did not work: start over with a new audio context.
         ctx.close().catch(() => {})
@@ -718,6 +753,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close()
       }
+      stopStrayMicStreams(null)
     }
   }, [])
 

@@ -40,8 +40,11 @@ const hasRememberedGrant = () => {
 /** Open the microphone for a moment. 'granted', 'denied' (turned off), or 'error' (something else). */
 async function probeMicrophone(): Promise<'granted' | 'denied' | 'error'> {
   try {
+    const opening = navigator.mediaDevices.getUserMedia({ audio: true })
+    // If the answer comes after the timeout, nobody is left to stop the stream: stop it here.
+    opening.then((late) => late.getTracks().forEach((t) => t.stop()), () => {})
     const stream = await Promise.race([
-      navigator.mediaDevices.getUserMedia({ audio: true }),
+      opening,
       new Promise<MediaStream>((_, reject) => setTimeout(() => reject(new Error('getUserMedia timeout')), 8000)),
     ])
     stream.getTracks().forEach((t) => t.stop())
@@ -128,8 +131,10 @@ export function useMicPermission() {
       const constraints: MediaStreamConstraints = isNativeIos()
         ? { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
         : { audio: true }
+      const opening = navigator.mediaDevices.getUserMedia(constraints)
+      opening.then((late) => late.getTracks().forEach((t) => t.stop()), () => {})
       const stream = await Promise.race([
-        navigator.mediaDevices.getUserMedia(constraints),
+        opening,
         // Long enough to read and answer the system dialog.
         new Promise<MediaStream>((_, reject) => setTimeout(() => reject(new Error('getUserMedia timeout')), 60000)),
       ])
