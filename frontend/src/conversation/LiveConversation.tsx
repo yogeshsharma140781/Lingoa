@@ -19,10 +19,12 @@ import { TOPICS, useStore } from '../store'
 import { DEFAULT_TURN_CONFIG, PERSONA_NAMES, REACTION_FALLBACKS, SKIP_UTTERANCES, STALL_PHRASES } from './config'
 import { MicGate } from './MicGate'
 import { autoContinues, describeState, initialState, transition, type ConversationEvent, type ConversationState } from './stateMachine'
+import { playCue } from './cues'
 import { TurnTaker, type TurnAction, type TurnSnapshot } from './turnTaking'
 import type { AiLine, Evaluation, Hints } from './types'
 import { ConversationView, type PlayTarget } from './ui/ConversationView'
 import { DebugOverlay } from './ui/DebugOverlay'
+import { SettingsSheet } from './ui/SettingsSheet'
 import { TranscriptSheet } from './ui/TranscriptSheet'
 import { useMicPermission } from './useMicPermission'
 
@@ -41,7 +43,17 @@ const MIN_SPEECH_MS = DEFAULT_TURN_CONFIG.minSpeechDuration * 1000
 const REAL_SPEECH_MS = 2200
 
 type Transcription = { text: string; detectedLanguage?: string | null } | null
-type Reply = { text: string; audio: string | null } | null
+type Reply = { text: string; audio: string | null; serverMs?: Record<string, number> | null } | null
+/** A reply being fetched, with the timings kept for the [Timing] log (see playNextReply). */
+type PendingReply = {
+  promise: Promise<Reply>
+  startedAt: number
+  transcribeMs: number
+  evaluateMs?: number
+  endWaitMs?: number
+  speechEndedAt?: number
+  readyAt?: number | null
+}
 
 export function LiveConversation() {
   const language = useStore((s) => s.targetLanguage)
@@ -94,6 +106,8 @@ export function LiveConversation() {
   const snapshotLaunchedRef = useRef(false)
   const specRef = useRef<{ speechMs: number; promise: Promise<Transcription> } | null>(null)
   const micOpenedAtRef = useRef(0)
+  // The next time the mic opens is the learner's turn after the AI spoke (or a retry): play the "your turn" sound first.
+  const cueNextOpenRef = useRef(false)
   const pendingStopRef = useRef<Promise<unknown> | null>(null) // the last turn's recorder, still finishing
   const firstSpeechAtRef = useRef<number | null>(null)
   const longestPauseRef = useRef(0)
@@ -101,7 +115,7 @@ export function LiveConversation() {
   const emptyTurnsRef = useRef(0)
   const sessionStartedAtRef = useRef(0)
   const goalLoggedRef = useRef(false)
-  const replyRef = useRef<{ promise: Promise<Reply>; startedAt: number; transcribeMs: number } | null>(null)
+  const replyRef = useRef<PendingReply | null>(null)
   const lastTranscriptRef = useRef('')
   const lastAiTextRef = useRef('')
   lastAiTextRef.current = aiLine.text
@@ -154,8 +168,12 @@ export function LiveConversation() {
     // If the last turn's recorder is still shutting down, let it finish before reopening the mic.
     const stopping = pendingStopRef.current
     pendingStopRef.current = null
+    const cue = cueNextOpenRef.current
+    cueNextOpenRef.current = false
     void (async () => {
       await stopping?.catch(() => null)
+      // The sound plays BEFORE the microphone opens, so the detector never hears it.
+      if (cue && micOnRef.current) await playCue('yourTurn')
       if (micOnRef.current) await startRecording()
     })()
   }, [startRecording])
@@ -238,6 +256,15 @@ export function LiveConversation() {
     }
   }, [send])
 
+  // The speaker button: the turn-taking sounds on or off (remembered). Turning them on plays one, as a preview.
+  const cuesEnabled = useStore((st) => st.cuesEnabled)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const onToggleSound = useCallback(() => {
+    const next = !useStore.getState().cuesEnabled
+    useStore.getState().setCuesEnabled(next)
+    if (next) void playCue('yourTurn')
+  }, [])
+
   // "Done": the learner ends their turn themselves instead of waiting for the silence. Same path as the
   // silence ending. Ignored unless they are speaking, and for a blip too short to be words.
   const onDone = useCallback(() => {
@@ -274,6 +301,9 @@ export function LiveConversation() {
   // ---- a finished turn: transcribe, judge, and get the next reply going ----
   const submitTurn = useCallback(async (reason: 'silence' | 'maxDuration' | 'manual') => {
     const startedAt = performance.now()
+    // When the learner actually stopped (the last moment of voice), so the whole wait can be timed from there.
+    const lastVoiced = lastVoicedAtRef.current
+    const speechEndedAt = startedAt - (lastVoiced !== null ? Math.max(0, (nowSec() - lastVoiced) * 1000) : 0)
     const speechMs = Math.round(turnSpeechMsRef.current)
     const turnIndex = turnIndexRef.current + 1
     const timeToFirstSpeechMs = firstSpeechAtRef.current !== null ? firstSpeechAtRef.current - micOpenedAtRef.current : null
@@ -301,6 +331,8 @@ export function LiveConversation() {
     const specValid = !!spec && spec.speechMs === turnSpeechMsRef.current
     const blobPromise = stopRecordingAndGetBlob()
     pendingStopRef.current = blobPromise
+    // The turn is over: a falling pair, played only once the recording has stopped (it must not be recorded).
+    blobPromise.then(() => { void playCue('done') }, () => {})
     useStore.getState().setIsSpeaking(false)
 
     let transcription: Transcription = null
@@ -367,7 +399,9 @@ export function LiveConversation() {
     lastTranscriptRef.current = text
 
     // Judge the answer. If the judge is unavailable the answer simply counts as fine.
+    const judgeStart = performance.now()
     const judged = (await apiRef.current.evaluateAnswer(text)) ?? { level: 'good' as const, alternative: null, changedWords: [] }
+    const evaluateMs = Math.round(performance.now() - judgeStart)
     if (closingRef.current) return
     const level = judged.level
     setEvaluation({
@@ -384,11 +418,17 @@ export function LiveConversation() {
     // while the learner reads the feedback. A "retry" does not: the AI keeps waiting.
     if (level !== 'retry') {
       useStore.getState().addMessage('user', text)
-      replyRef.current = {
+      const pending: PendingReply = {
         promise: apiRef.current.getAiResponse(text, transcription?.detectedLanguage ?? null, { withVoice: true }),
         startedAt: performance.now(),
         transcribeMs,
+        evaluateMs,
+        endWaitMs: Math.round(startedAt - speechEndedAt),
+        speechEndedAt,
+        readyAt: null,
       }
+      pending.promise.then(() => { pending.readyAt = performance.now() }, () => {})
+      replyRef.current = pending
     } else {
       replyRef.current = null
     }
@@ -401,6 +441,7 @@ export function LiveConversation() {
   const playNextReply = useCallback(async () => {
     const pending = replyRef.current
     replyRef.current = null
+    const calledAt = performance.now() // the learner moved on (Continue, or the auto-advance)
     let reply: Reply = null
     try {
       reply = pending ? await pending.promise : null
@@ -417,10 +458,27 @@ export function LiveConversation() {
       let audioStartMs: number | null = null
       const playStart = performance.now()
       await apiRef.current.textToSpeech(text, () => { audioStartMs = Math.round(performance.now() - playStart) }, reply.audio ?? undefined)
-      apiRef.current.logEvent('response_timing', {
+      // Where the time went, from the end of the learner's sentence to the AI's voice. Read this in the console
+      // ("[Timing]"), or in the response_timing event.
+      const readyAt = pending?.readyAt ?? null
+      const timing = {
+        end_wait_ms: pending?.endWaitMs ?? null, // silence waited before the answer was sent
         transcribe_ms: pending?.transcribeMs ?? null,
-        reply_ready_ms: waitedMs,
+        evaluate_ms: pending?.evaluateMs ?? null, // the judge
+        reply_took_ms: pending && readyAt ? Math.round(readyAt - pending.startedAt) : null, // reply text + voice
+        continue_after_ms: pending ? Math.round(calledAt - pending.startedAt) : null, // time on the feedback screen, about
+        reply_wait_ms: readyAt ? Math.max(0, Math.round(readyAt - calledAt)) : null, // waited after moving on (0 = was ready)
         audio_start_ms: audioStartMs,
+        since_speech_end_ms:
+          pending?.speechEndedAt !== undefined && audioStartMs !== null
+            ? Math.round(playStart + audioStartMs - pending.speechEndedAt)
+            : null,
+        ...Object.fromEntries(Object.entries(reply.serverMs ?? {}).map(([k, v]) => [`server_${k}`, v])),
+      }
+      console.log('[Timing]', JSON.stringify(timing))
+      apiRef.current.logEvent('response_timing', {
+        ...timing,
+        reply_ready_ms: waitedMs,
         voice_with_reply: !!reply.audio,
         ui: 'v2',
       })
@@ -428,7 +486,10 @@ export function LiveConversation() {
       // We heard them but no reply came back: go back to listening rather than hang.
       apiRef.current.logEvent('turn_failed', { stage: 'respond', ui: 'v2' })
     }
-    if (!closingRef.current) send({ type: 'AI_AUDIO_ENDED' })
+    if (!closingRef.current) {
+      cueNextOpenRef.current = true
+      send({ type: 'AI_AUDIO_ENDED' })
+    }
   }, [send])
 
   // ---- start ----
@@ -448,7 +509,10 @@ export function LiveConversation() {
       await unlockAudio().catch(() => {})
       await sleep(300) // let the audio system settle (iOS)
       if (session.greeting) await apiRef.current.textToSpeech(session.greeting)
-      if (!closingRef.current) send({ type: 'AI_AUDIO_ENDED' })
+      if (!closingRef.current) {
+        cueNextOpenRef.current = true
+        send({ type: 'AI_AUDIO_ENDED' })
+      }
     } catch (err: any) {
       console.error('[Conversation] failed to start', err)
       initRef.current = false
@@ -632,6 +696,7 @@ export function LiveConversation() {
   }, [send, playNextReply])
 
   const onTryAgain = useCallback(() => {
+    cueNextOpenRef.current = true
     send({ type: 'TRY_AGAIN' })
     setEvaluation(null)
   }, [send])
@@ -722,11 +787,13 @@ export function LiveConversation() {
         onTapAvatar={() => send({ type: 'TAP_AVATAR' })}
         onShowHint={onShowHint}
         onDone={onDone}
+        onOpenSettings={() => setSettingsOpen(true)}
         onPlay={onPlay}
         onContinue={onContinue}
         onTryAgain={onTryAgain}
         onSkip={onSkip}
       />
+      <SettingsSheet open={settingsOpen} soundOn={cuesEnabled} onToggleSound={onToggleSound} onClose={() => setSettingsOpen(false)} />
       <TranscriptSheet open={sheetOpen} language={language} onClose={() => setSheetOpen(false)} messages={messages} />
       {import.meta.env.DEV && <DebugOverlay state={state} snapshot={debugSnap} />}
     </div>

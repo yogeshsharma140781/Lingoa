@@ -8,6 +8,7 @@ import { initialState, transition, type ConversationEvent, type ConversationStat
 import type { AiLine, Evaluation, Hints } from '../types'
 import { ConversationView, type PlayTarget } from './ConversationView'
 import { DebugOverlay } from './DebugOverlay'
+import { SettingsSheet } from './SettingsSheet'
 import { TranscriptSheet } from './TranscriptSheet'
 
 const AI_LINES: Record<string, AiLine> = {
@@ -50,6 +51,8 @@ export default function ConversationGallery() {
   const [state, setState] = useState<ConversationState>({ name: 'userListening' })
   const [showTranslation, setShowTranslation] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [soundOn, setSoundOn] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [playing, setPlaying] = useState<PlayTarget | null>(null)
   const [size, setSize] = useState(SIZES[0])
   const [textScale, setTextScale] = useState(100)
@@ -141,11 +144,13 @@ export default function ConversationGallery() {
             onTapAvatar={() => fire({ type: 'TAP_AVATAR' })}
             onShowHint={() => fire({ type: 'SHOW_HINT' })}
             onDone={() => fire({ type: 'TURN_ENDED' })}
+            onOpenSettings={() => setSettingsOpen(true)}
             onPlay={play}
             onContinue={() => fire({ type: 'CONTINUE' })}
             onTryAgain={() => fire({ type: 'TRY_AGAIN' })}
             onSkip={() => fire({ type: 'SKIP' })}
           />
+          <SettingsSheet open={settingsOpen} soundOn={soundOn} onToggleSound={() => setSoundOn((v) => !v)} onClose={() => setSettingsOpen(false)} />
           <TranscriptSheet
             open={sheetOpen}
             language="nl"

@@ -2,7 +2,7 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/source-serif-4'
 import './conversation.css'
 
-import { Languages, MessagesSquare, Play, Volume2, X } from 'lucide-react'
+import { Languages, MessagesSquare, MoreHorizontal, Play, Volume2, X } from 'lucide-react'
 import { Fragment, useEffect, useRef } from 'react'
 import { REACTION_FALLBACKS } from '../config'
 import { describeState, type ConversationState } from '../stateMachine'
@@ -42,6 +42,8 @@ export interface ConversationViewProps {
   onShowHint: () => void
   /** The learner is done speaking: end the turn now. */
   onDone: () => void
+  /** The three-dots button: opens the settings sheet. */
+  onOpenSettings?: () => void
   onPlay: (target: PlayTarget) => void
   onContinue: () => void
   onTryAgain: () => void
@@ -242,9 +244,16 @@ export function ConversationView(props: ConversationViewProps) {
           <MessagesSquare size={20} aria-hidden="true" />
         </button>
         <div className="conv-title">{scenarioTitle}</div>
-        <button type="button" className="conv-icon-btn" onClick={props.onClose} aria-label="Close conversation">
-          <X size={20} aria-hidden="true" />
-        </button>
+        <div className="conv-header-right">
+          {props.onOpenSettings && (
+            <button type="button" className="conv-icon-btn" onClick={props.onOpenSettings} aria-label="Settings" aria-haspopup="dialog">
+              <MoreHorizontal size={20} aria-hidden="true" />
+            </button>
+          )}
+          <button type="button" className="conv-icon-btn" onClick={props.onClose} aria-label="Close conversation">
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       {/* Scrolls only when text is large or the phone is small; header and footer stay put. */}

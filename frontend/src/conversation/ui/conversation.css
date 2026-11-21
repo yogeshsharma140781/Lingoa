@@ -66,11 +66,16 @@
 /* ---- header (same in every state) ---- */
 .conv-header {
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: 96px 1fr 96px;
   align-items: center;
   gap: 8px;
   padding: 12px 20px 0;
   flex-shrink: 0;
+}
+.conv-header-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .conv-title {
   text-align: center;
@@ -373,6 +378,19 @@
 }
 .conv-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 0 20px; }
 .conv-sheet-body { overflow-y: auto; padding: 4px 20px 24px; }
+.conv-setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0 4px; }
+.conv-setting-label { font-size: 1em; font-weight: 500; color: #111; line-height: 1.3; }
+.conv-setting-hint { margin-top: 2px; font-size: 0.8125em; color: #404040; line-height: 1.35; }
+.conv-switch {
+  flex: none; position: relative; width: 52px; height: 32px; padding: 0; border: 0; border-radius: 16px;
+  background: #cfcfcf; cursor: pointer; transition: background 0.15s;
+}
+.conv-switch i {
+  position: absolute; left: 3px; top: 3px; width: 26px; height: 26px; border-radius: 50%;
+  background: #fff; transition: transform 0.15s; display: block;
+}
+.conv-switch[data-on='true'] { background: #e2601f; }
+.conv-switch[data-on='true'] i { transform: translateX(20px); }
 .conv-msg { margin: 0 0 14px; }
 .conv-msg small { display: block; margin-bottom: 2px; font-size: 0.75em; color: #404040; }
 .conv-msg p { margin: 0; font-size: 1em; line-height: 1.35; color: #111; }

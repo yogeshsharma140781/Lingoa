@@ -10,6 +10,7 @@ import base64
 import uuid
 import random
 import re
+import time
 from datetime import datetime
 from typing import Optional, AsyncGenerator, List, Literal
 from contextlib import asynccontextmanager
@@ -1157,6 +1158,7 @@ async def evaluate_answer(data: EvaluateRequest):
     target_language = session.get("target_language", "en")
     target_name = LANGUAGE_NAMES.get(target_language, "the target language")
 
+    t_eval = time.perf_counter()
     try:
         resp = await client.chat.completions.create(
             model=EVALUATION_MODEL_HINDI if target_language == "hi" else EVALUATION_MODEL,
@@ -1183,6 +1185,7 @@ async def evaluate_answer(data: EvaluateRequest):
 
     result = clean_evaluation(parsed, transcript, target_language)
     print(f"[EVALUATE] lang={target_language} level={result['level']} transcript={transcript!r}")
+    print(f"[TIMING] evaluate llm_ms={round((time.perf_counter() - t_eval) * 1000)}")
     return result
 
 
@@ -1740,7 +1743,9 @@ async def transcribe_audio(
                 # Force transcription in the specified language - this is not just a hint, it forces the output language
                 kwargs["language"] = language_hint
                 print(f"[TRANSCRIBE] Forcing language={language_hint}")
+            t_whisper = time.perf_counter()
             t = await client.audio.transcriptions.create(**kwargs)
+            print(f"[TIMING] transcribe whisper_ms={round((time.perf_counter() - t_whisper) * 1000)} audio_kb={len(audio_data) // 1024}")
             text_out = (getattr(t, "text", None) or "").strip()
             detected_out = getattr(t, "language", None)
             used_hint_out = language_hint
@@ -2086,6 +2091,8 @@ async def respond_to_user(data: UserMessage):
     session = sessions[data.session_id]
     
     async def generate_stream():
+        t_start = time.perf_counter()
+        marks: dict = {}
         try:
             print(
                 f"[RESPOND] session={data.session_id} "
@@ -2184,6 +2191,7 @@ async def respond_to_user(data: UserMessage):
                 print(f"[INTENT INFERENCE] Interpreted: {raw_transcript[:60]!r} -> {interpreted[:60]!r}")
 
             session["messages"].append({"role": "user", "content": user_for_context})
+            marks["prep_ms"] = round((time.perf_counter() - t_start) * 1000)  # before the reply model is called
 
             response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -2207,12 +2215,15 @@ async def respond_to_user(data: UserMessage):
             full_response = ""
             async for chunk in response:
                 if chunk.choices[0].delta.content:
+                    if "first_token_ms" not in marks:
+                        marks["first_token_ms"] = round((time.perf_counter() - t_start) * 1000)
                     content = chunk.choices[0].delta.content
                     if session["target_language"] == "hi":
                         content = enforce_hindi_female_self_reference(content)
                     full_response += content
                     yield f"data: {json.dumps({'text': content, 'done': False})}\n\n"
             
+            marks["text_ms"] = round((time.perf_counter() - t_start) * 1000)
             if session["target_language"] == "hi":
                 full_response = enforce_hindi_female_self_reference(full_response)
             elif session["target_language"] != "en":
@@ -2226,6 +2237,8 @@ async def respond_to_user(data: UserMessage):
                 else:
                     print("[LANG ENFORCER] skipped (reply already looks like the target language)")
 
+            marks["checked_ms"] = round((time.perf_counter() - t_start) * 1000)
+
             # Save assistant response
             session["messages"].append({"role": "assistant", "content": full_response})
             yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': full_response, 'target_language': session.get('target_language')})}\n\n"
@@ -2238,7 +2251,12 @@ async def respond_to_user(data: UserMessage):
                     yield f"data: {json.dumps({'type': 'audio', 'audio': base64.b64encode(audio_bytes).decode('utf-8'), 'format': 'mp3'})}\n\n"
                 except Exception as audio_error:
                     print(f"[RESPOND] Voice generation failed, client will fall back: {audio_error}")
-            
+                marks["voice_ms"] = round((time.perf_counter() - t_start) * 1000)
+
+            # How long each step took (ms since the request arrived), for finding what is slow.
+            print(f"[TIMING] respond {marks}")
+            yield f"data: {json.dumps({'type': 'timings', 'ms': marks})}\n\n"
+
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     

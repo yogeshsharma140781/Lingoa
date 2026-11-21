@@ -108,6 +108,9 @@ interface AppState {
   setIsAiSpeaking: (speaking: boolean) => void
   audioSpeed: number
   setAudioSpeed: (speed: number) => void
+  /** The short sounds that mark "your turn" and "done" (the learner can switch them off). */
+  cuesEnabled: boolean
+  setCuesEnabled: (on: boolean) => void
 
   // Conversation
   aiMessage: string
@@ -227,6 +230,21 @@ export const useStore = create<AppState>((set) => ({
   setAudioSpeed: (speed) => {
     localStorage.setItem('lingoa_speed', speed.toString())
     set({ audioSpeed: speed })
+  },
+  cuesEnabled: (() => {
+    try {
+      return localStorage.getItem('lingoa_cues') !== 'off'
+    } catch {
+      return true
+    }
+  })(),
+  setCuesEnabled: (on) => {
+    try {
+      localStorage.setItem('lingoa_cues', on ? 'on' : 'off')
+    } catch {
+      // not saved, still applies for now
+    }
+    set({ cuesEnabled: on })
   },
 
   // Conversation

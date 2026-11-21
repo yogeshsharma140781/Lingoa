@@ -154,8 +154,8 @@ export async function unlockAudio(): Promise<void> {
   })
 }
 
-// Get or create audio context
-function getAudioContext(): AudioContext {
+// Get or create audio context (shared with the turn-taking sounds, see conversation/cues.ts)
+export function getAudioContext(): AudioContext {
   if (!audioContext) {
     audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
   }
@@ -419,10 +419,12 @@ export function useApi() {
       // Task 1: skip improvement pass for faster transcription
       const improveParam = '&improve_sentence=false'
       const speechParam = speechMs !== undefined ? `&speech_ms=${Math.round(speechMs)}` : ''
+      const sentAt = performance.now()
       const res = await fetchWithTimeout(`${API_BASE}/transcribe?language=${targetLanguage}${hintParam}${fallbackParam}${sessionParam}${improveParam}${speechParam}`, {
         method: 'POST',
         body: formData,
       }, TRANSCRIBE_TIMEOUT_MS)
+      console.log(`[Timing] transcribe request ${Math.round(performance.now() - sentAt)} ms (${Math.round(audioBlob.size / 1024)} KB)`)
 
       if (res.ok) {
         const data = await res.json()
@@ -516,7 +518,7 @@ export function useApi() {
     transcript: string,
     detectedLanguage?: string | null,
     options?: { withVoice?: boolean; onFinalText?: (text: string) => void }
-  ): Promise<{ text: string; audio: string | null } | null> => {
+  ): Promise<{ text: string; audio: string | null; serverMs?: Record<string, number> | null } | null> => {
     if (!sessionId) return null
 
     try {
@@ -547,6 +549,7 @@ export function useApi() {
       const decoder = new TextDecoder()
       let fullResponse = ''
       let audioBase64: string | null = null
+      let serverMs: Record<string, number> | null = null // how long the server spent on each step (see [TIMING])
       let finalTextAnnounced = false
       let buffer = '' // events can span several network chunks (the voice is one big event)
 
@@ -605,6 +608,10 @@ export function useApi() {
                 audioBase64 = data.audio
                 continue
               }
+              if (data.type === 'timings' && data.ms && typeof data.ms === 'object') {
+                serverMs = data.ms
+                continue
+              }
               if (data.text) {
                 appendAiMessage(data.text)
                 fullResponse += data.text
@@ -625,7 +632,7 @@ export function useApi() {
         }
       }
 
-      return { text: fullResponse, audio: audioBase64 }
+      return { text: fullResponse, audio: audioBase64, serverMs }
     } catch (err) {
       console.error('AI response error:', err)
     }
