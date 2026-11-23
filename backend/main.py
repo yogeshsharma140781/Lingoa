@@ -10,6 +10,7 @@ import base64
 import uuid
 import random
 import re
+import httpx
 import time
 from datetime import datetime
 from typing import Optional, AsyncGenerator, List, Literal
@@ -20,7 +21,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
@@ -78,6 +79,8 @@ ALLOWED_CLIENT_EVENT_TYPES = {
     "transcribe_failed",
     "turn_failed",
     "turn_skipped",
+    "feedback_shown",
+    "feedback_dismissed",
 }
 
 # In-memory: active conversation state only (lives for the duration of one
@@ -700,6 +703,17 @@ class ClientEvent(BaseModel):
     session_id: Optional[str] = None  # which conversation it belongs to (lets events be joined per session)
     metadata: Optional[dict] = None
 
+class FeedbackRequest(BaseModel):
+    user_id: str
+    rating: Optional[int] = Field(default=None, ge=1, le=5)  # stars
+    message: Optional[str] = None
+    email: Optional[str] = None  # only if the user wants a reply
+    target_language: Optional[str] = None
+    session_id: Optional[str] = None
+    app_version: Optional[str] = None
+    platform: Optional[str] = None
+
+
 class SuggestionsRequest(BaseModel):
     session_id: str
 
@@ -907,6 +921,85 @@ async def log_client_event(data: ClientEvent):
         metadata=data.metadata,
     )
     return {"ok": True}
+
+_feedback_sent_at: dict = {}  # user_id -> recent send times, to stop floods
+
+
+async def _email_feedback(subject: str, body: str, reply_to: Optional[str]) -> bool:
+    """Send one email through Resend. Returns False (and logs why) if it could not be sent."""
+    api_key = os.getenv("RESEND_API_KEY")
+    to_address = os.getenv("FEEDBACK_TO_EMAIL")
+    if not api_key or not to_address:
+        print("[FEEDBACK] RESEND_API_KEY / FEEDBACK_TO_EMAIL not set - feedback is only in the events table")
+        return False
+    payload = {
+        "from": os.getenv("FEEDBACK_FROM_EMAIL", "Lingoa <onboarding@resend.dev>"),
+        "to": [to_address],
+        "subject": subject,
+        "text": body,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            res = await http.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+        if res.status_code >= 300:
+            print(f"[FEEDBACK] Resend refused the email: {res.status_code} {res.text[:200]}")
+            return False
+        return True
+    except Exception as e:
+        print(f"[FEEDBACK] Email failed: {e}")
+        return False
+
+
+@app.post("/api/feedback")
+async def submit_feedback(data: FeedbackRequest):
+    """A user's feedback: stored as an event and emailed to the developer."""
+    message = (data.message or "").strip()[:2000]
+    email = (data.email or "").strip()[:200] or None
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        email = None
+    if not message and not data.rating:
+        raise HTTPException(status_code=400, detail="Empty feedback")
+
+    now = time.time()
+    recent = [t for t in _feedback_sent_at.get(data.user_id, []) if now - t < 3600]
+    if len(recent) >= 5:
+        raise HTTPException(status_code=429, detail="Too much feedback, try again later")
+    _feedback_sent_at[data.user_id] = recent + [now]
+
+    await db.log_event(
+        data.user_id,
+        "feedback",
+        target_language=data.target_language,
+        session_id=data.session_id,
+        metadata={
+            "rating": data.rating,
+            "message": message,
+            "email": email,
+            "app_version": data.app_version,
+            "platform": data.platform,
+        },
+    )
+
+    stars = ("★" * data.rating + "☆" * (5 - data.rating) + f" {data.rating}/5") if data.rating else "(no rating)"
+    language = LANGUAGE_NAMES.get(data.target_language or "", data.target_language or "?")
+    body = (
+        f"{stars}\n\n"
+        f"{message or '(no message)'}\n\n"
+        f"---\n"
+        f"Reply to: {email or '(none given)'}\n"
+        f"Learning: {language}\n"
+        f"App: {data.app_version or '?'} on {data.platform or '?'}\n"
+        f"User: {data.user_id}\n"
+    )
+    emailed = await _email_feedback(f"Lingoa feedback: {stars}", body, email)
+    return {"ok": True, "emailed": emailed}
+
 
 @app.post("/api/suggestions")
 async def get_reply_suggestions(data: SuggestionsRequest):

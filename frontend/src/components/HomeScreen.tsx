@@ -6,6 +6,8 @@ import { Flame, Play, ChevronDown, Check, X } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
 import { unlockAudio, useApi } from '../hooks/useApi'
 import { NotificationPrompt } from './NotificationPrompt'
+import { FeedbackSheet } from './FeedbackSheet'
+import { hasBeenAskedForFeedback, MIN_SPEAKING_MS_FOR_FEEDBACK } from '../feedback'
 import { wrapUpMessage, shouldAskFeeling, type SessionWrapUp } from '../encouragement'
 
 export function HomeScreen() {
@@ -35,6 +37,33 @@ export function HomeScreen() {
     setAskFeeling(shouldAskFeeling())
     setFeelingAnswered(false)
   }, [sessionWrapUp])
+
+  // The one-time feedback ask, after the first real conversation. It waits for the reminder
+  // prompt (which has its own moment) and shows a little after the kind word.
+  const [feedbackDue, setFeedbackDue] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const feedbackCheckedRef = useRef<SessionWrapUp | null>(null)
+  useEffect(() => {
+    if (!sessionWrapUp || feedbackCheckedRef.current === sessionWrapUp) return
+    feedbackCheckedRef.current = sessionWrapUp
+    if (sessionWrapUp.speakingMs >= MIN_SPEAKING_MS_FOR_FEEDBACK && !hasBeenAskedForFeedback()) {
+      setFeedbackDue(true)
+    }
+  }, [sessionWrapUp])
+  useEffect(() => {
+    if (!feedbackDue || pendingNotificationPrompt || feedbackOpen) return
+    const id = window.setTimeout(() => {
+      if (hasBeenAskedForFeedback()) return
+      setFeedbackOpen(true)
+      setSessionWrapUp(null)
+      logEvent('feedback_shown')
+    }, 3000)
+    return () => window.clearTimeout(id)
+  }, [feedbackDue, pendingNotificationPrompt, feedbackOpen, setSessionWrapUp, logEvent])
+  const closeFeedback = () => {
+    setFeedbackOpen(false)
+    setFeedbackDue(false)
+  }
 
   const answerFeeling = (feeling: 'hard' | 'ok' | 'great') => {
     if (!sessionWrapUp || feelingAnswered) return
@@ -216,6 +245,10 @@ export function HomeScreen() {
             )}
           </motion.div>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {feedbackOpen && !pendingNotificationPrompt && <FeedbackSheet key="feedback" onClose={closeFeedback} />}
       </AnimatePresence>
 
       <AnimatePresence>

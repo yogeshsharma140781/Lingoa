@@ -255,7 +255,9 @@ export function useApi() {
       | 'goal_reached'
       | 'transcribe_failed'
       | 'turn_failed'
-      | 'turn_skipped',
+      | 'turn_skipped'
+      | 'feedback_shown'
+      | 'feedback_dismissed',
     metadata?: Record<string, unknown>
   ) => {
     // Capture the session now: the screen may reset it before the request is built.
