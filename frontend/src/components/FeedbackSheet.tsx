@@ -10,7 +10,7 @@ import { markFeedbackAsked, sendFeedback } from '../feedback'
 const STAR_NAMES = ['awful', 'bad', 'okay', 'good', 'great']
 
 // Asked once, right after the first real conversation. Sent to the developer's inbox.
-export function FeedbackSheet({ onClose }: { onClose: () => void }) {
+export function FeedbackSheet({ onClose, manual = false }: { onClose: () => void; manual?: boolean }) {
   const { userId, targetLanguage } = useStore()
   const { logEvent } = useApi()
   const [rating, setRating] = useState<number | null>(null)
@@ -23,8 +23,11 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
   const canSend = (rating !== null || message.trim().length > 0) && !sending
 
   const notNow = () => {
-    markFeedbackAsked()
-    logEvent('feedback_dismissed')
+    // Closing a sheet they opened themselves says nothing about the one-time ask.
+    if (!manual) {
+      markFeedbackAsked()
+      logEvent('feedback_dismissed')
+    }
     onClose()
   }
 
@@ -71,7 +74,9 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
           <>
             <h3 className="font-display text-xl font-semibold mb-2">Hi, I'm Yogesh, the one person behind Lingoa.</h3>
             <p className="lt-muted text-sm mb-5 leading-relaxed">
-              Your first session helps me more than anything else. What would make this better for you?
+              {manual
+                ? 'I read every message. What would make Lingoa better for you?'
+                : 'Your first session helps me more than anything else. What would make this better for you?'}
             </p>
 
             <div className="mb-4 flex justify-center gap-1" role="radiogroup" aria-label="Your rating">
@@ -123,7 +128,7 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
 
             <div className="flex gap-3">
               <button type="button" onClick={notNow} className="lt-secondary flex-1 !min-h-[48px]">
-                Not now
+                {manual ? 'Cancel' : 'Not now'}
               </button>
               <button type="button" onClick={send} disabled={!canSend} className="lt-primary flex-1 !min-h-[48px]">
                 {sending ? 'Sending…' : 'Send'}

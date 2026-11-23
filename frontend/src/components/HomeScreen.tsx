@@ -2,7 +2,7 @@ import { Flag } from './Flag'
 import logo from '../assets/logo.svg'
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Flame, Play, ChevronDown, Check, X } from 'lucide-react'
+import { Flame, Play, ChevronDown, Check, X, MessageSquare } from 'lucide-react'
 import { useStore, LANGUAGES } from '../store'
 import { unlockAudio, useApi } from '../hooks/useApi'
 import { NotificationPrompt } from './NotificationPrompt'
@@ -63,6 +63,7 @@ export function HomeScreen() {
     }, 1200)
     return () => window.clearTimeout(id)
   }, [feedbackDue, pendingNotificationPrompt, feedbackOpen, setSessionWrapUp, logEvent])
+  const [manualFeedbackOpen, setManualFeedbackOpen] = useState(false)
   const closeFeedback = () => {
     setFeedbackOpen(false)
     setFeedbackDue(false)
@@ -203,6 +204,17 @@ export function HomeScreen() {
         <p className="text-center lt-faint text-sm mt-4">
           Speak for {targetMinutesLabel} to complete your daily goal
         </p>
+
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setManualFeedbackOpen(true)}
+            className="lt-pill mt-6 min-h-[44px] px-4 text-sm active:bg-[#e2e2e2] transition-colors"
+          >
+            <MessageSquare className="w-4 h-4" aria-hidden="true" />
+            Send feedback
+          </button>
+        </div>
       </motion.div>
 
       {/* Kind word after a conversation (skipped when the reminder prompt is up, which has its own moment) */}
@@ -248,6 +260,10 @@ export function HomeScreen() {
             )}
           </motion.div>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {manualFeedbackOpen && <FeedbackSheet key="feedback-manual" manual onClose={() => setManualFeedbackOpen(false)} />}
       </AnimatePresence>
 
       <AnimatePresence>
