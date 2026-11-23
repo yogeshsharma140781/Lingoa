@@ -38,8 +38,9 @@ export function HomeScreen() {
     setFeelingAnswered(false)
   }, [sessionWrapUp])
 
-  // The one-time feedback ask, after the first real conversation. It waits for the reminder
-  // prompt (which has its own moment) and shows a little after the kind word.
+  // The one-time feedback ask, after the first real conversation. It takes the place of the
+  // kind-word card (which would ask a second, overlapping question) and waits for the reminder
+  // prompt, which has its own moment.
   const [feedbackDue, setFeedbackDue] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const feedbackCheckedRef = useRef<SessionWrapUp | null>(null)
@@ -50,6 +51,8 @@ export function HomeScreen() {
       setFeedbackDue(true)
     }
   }, [sessionWrapUp])
+  const feedbackReplacesWrapUp =
+    feedbackDue || (!!sessionWrapUp && sessionWrapUp.speakingMs >= MIN_SPEAKING_MS_FOR_FEEDBACK && !hasBeenAskedForFeedback())
   useEffect(() => {
     if (!feedbackDue || pendingNotificationPrompt || feedbackOpen) return
     const id = window.setTimeout(() => {
@@ -57,7 +60,7 @@ export function HomeScreen() {
       setFeedbackOpen(true)
       setSessionWrapUp(null)
       logEvent('feedback_shown')
-    }, 3000)
+    }, 1200)
     return () => window.clearTimeout(id)
   }, [feedbackDue, pendingNotificationPrompt, feedbackOpen, setSessionWrapUp, logEvent])
   const closeFeedback = () => {
@@ -204,7 +207,7 @@ export function HomeScreen() {
 
       {/* Kind word after a conversation (skipped when the reminder prompt is up, which has its own moment) */}
       <AnimatePresence>
-        {sessionWrapUp && !pendingNotificationPrompt && (
+        {sessionWrapUp && !pendingNotificationPrompt && !feedbackReplacesWrapUp && (
           <motion.div
             key="wrap-up"
             initial={{ opacity: 0, y: -12 }}
