@@ -29,6 +29,7 @@ load_dotenv()
 
 # Import TTS provider (ElevenLabs primary, OpenAI fallback)
 import db
+import wrap
 
 from tts_provider import (
     get_tts_provider, 
@@ -81,6 +82,10 @@ ALLOWED_CLIENT_EVENT_TYPES = {
     "turn_skipped",
     "feedback_shown",
     "feedback_dismissed",
+    "wrap_offered",
+    "wrap_keep_going",
+    "wrap_new_topic",
+    "wrap_finish",
 }
 
 # In-memory: active conversation state only (lives for the duration of one
@@ -2175,6 +2180,42 @@ async def transcribe_audio_chunk(
         print(f"[TRANSCRIBE CHUNK ERROR] {e}")
         return {"partial": ""}
 
+async def judge_wrap(session: dict) -> str:
+    """After a reply: has the conversation reached a natural point to change topic or stop?
+    Returns "continue", "switch" or "end". Never raises and never takes long: any trouble means "continue"."""
+    turns = len(session.get("user_utterances", []))
+    last_offer = session.get("last_wrap_turn")
+    is_roleplay = bool(session.get("roleplay_id") or session.get("custom_scenario"))
+    if wrap.must_offer(turns, last_offer):
+        return wrap.forced_verdict(is_roleplay)
+    if not wrap.may_check(turns, last_offer):
+        return "continue"
+    lines = [
+        f"{'AI' if m.get('role') == 'assistant' else 'Learner'}: {m.get('content', '')}"
+        for m in session.get("messages", [])[-8:]
+    ]
+    try:
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=EVALUATION_MODEL,
+                messages=[
+                    {"role": "system", "content": wrap.WRAP_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"The learner has spoken {turns} times so far. The last lines:\n" + "\n".join(lines)},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=20,
+                temperature=0,
+            ),
+            timeout=2.5,
+        )
+        verdict = wrap.clean_verdict(json.loads(resp.choices[0].message.content or "{}"), is_roleplay)
+        print(f"[WRAP] turns={turns} verdict={verdict}")
+        return verdict
+    except Exception as e:
+        print(f"[WRAP] check failed ({type(e).__name__}); carrying on")
+        return "continue"
+
+
 @app.post("/api/conversation/respond")
 async def respond_to_user(data: UserMessage):
     """Generate streaming AI response"""
@@ -2334,6 +2375,8 @@ async def respond_to_user(data: UserMessage):
 
             # Save assistant response
             session["messages"].append({"role": "assistant", "content": full_response})
+            # Is this a natural place to change topic or stop? Decided while the voice is being made.
+            wrap_task = asyncio.create_task(judge_wrap(session))
             yield f"data: {json.dumps({'text': '', 'done': True, 'full_response': full_response, 'target_language': session.get('target_language')})}\n\n"
 
             # The voice rides on the same stream, right behind the text, so the phone doesn't need a
@@ -2345,6 +2388,12 @@ async def respond_to_user(data: UserMessage):
                 except Exception as audio_error:
                     print(f"[RESPOND] Voice generation failed, client will fall back: {audio_error}")
                 marks["voice_ms"] = round((time.perf_counter() - t_start) * 1000)
+
+            wrap_kind = await wrap_task
+            marks["wrap_ms"] = round((time.perf_counter() - t_start) * 1000)
+            if wrap_kind != "continue":
+                session["last_wrap_turn"] = len(session.get("user_utterances", []))
+                yield f"data: {json.dumps({'type': 'wrap', 'kind': wrap_kind})}\n\n"
 
             # How long each step took (ms since the request arrived), for finding what is slow.
             print(f"[TIMING] respond {marks}")
@@ -2361,6 +2410,65 @@ async def respond_to_user(data: UserMessage):
             "Connection": "keep-alive",
         }
     )
+
+class NewTopicRequest(BaseModel):
+    session_id: str
+    tts_speed: Optional[float] = None  # when set, the line comes back spoken too
+
+
+@app.post("/api/conversation/new-topic")
+async def new_topic(data: NewTopicRequest):
+    """The learner chose "New topic": pick a subject they have not just had and say a short line that
+    closes the old one and opens the new one. The session (and so their speaking time) carries on."""
+    session = sessions.get(data.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("roleplay_id") or session.get("custom_scenario"):
+        raise HTTPException(status_code=400, detail="A role-play has no topic to change")
+
+    language = session.get("target_language", "en")
+    language_name = LANGUAGE_NAMES.get(language, "the target language")
+    used = session.setdefault("topics_used", [session.get("topic") or "random"])
+    topic = wrap.pick_next_topic(TOPIC_CONTEXT.keys(), session.get("topic"), used)
+    used.append(topic)
+    session["topic"] = topic
+
+    system = (
+        get_conversation_prompt(language, topic)
+        + f"\n\nNOW: you and the learner have finished with the previous subject. In ONE or TWO short spoken sentences, "
+        f"close it with a few warm words, then bring up the new subject ({TOPIC_CONTEXT[topic]}) with ONE easy question. "
+        f"Speak only {language_name}. Do not explain that you are changing topic."
+    )
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": system}, *session.get("messages", [])[-6:]],
+            max_tokens=100,
+            temperature=0.9,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        if language == "hi":
+            text = enforce_hindi_female_self_reference(text)
+        elif language != "en" and text and reply_needs_language_check(text, language):
+            text = await ensure_target_language(text, language)
+    except Exception as e:
+        print(f"[NEW TOPIC] failed: {e}")
+        raise HTTPException(status_code=502, detail="Could not start a new topic")
+    if not text:
+        raise HTTPException(status_code=502, detail="Could not start a new topic")
+
+    session["messages"].append({"role": "assistant", "content": text})
+    # Their last answer belongs to the old subject: do not count the new one as already "explored".
+    session["last_wrap_turn"] = len(session.get("user_utterances", []))
+    audio_b64 = None
+    if data.tts_speed is not None:
+        try:
+            audio_b64 = base64.b64encode(await synthesize_speech_bytes(text, language, data.tts_speed)).decode("utf-8")
+        except Exception as e:
+            print(f"[NEW TOPIC] voice failed, client will fall back: {e}")
+    print(f"[NEW TOPIC] lang={language} topic={topic} text={text[:80]!r}")
+    return {"topic": topic, "text": text, "audio": audio_b64}
+
 
 # ============ Speech Formatting for Natural TTS ============
 

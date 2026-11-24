@@ -21,6 +21,9 @@ export const getApiBase = () => {
 
 export const API_BASE = getApiBase()
 
+/** Why the server suggests a pause: the subject ran its course ('switch') or the exchange reached its end ('end'). */
+export type WrapKind = 'switch' | 'end'
+
 export interface ReplySuggestion {
   text: string     // What the learner could say, in the target language
   english: string  // Short English hint
@@ -257,7 +260,11 @@ export function useApi() {
       | 'turn_failed'
       | 'turn_skipped'
       | 'feedback_shown'
-      | 'feedback_dismissed',
+      | 'feedback_dismissed'
+      | 'wrap_offered'
+      | 'wrap_keep_going'
+      | 'wrap_new_topic'
+      | 'wrap_finish',
     metadata?: Record<string, unknown>
   ) => {
     // Capture the session now: the screen may reset it before the request is built.
@@ -520,7 +527,7 @@ export function useApi() {
     transcript: string,
     detectedLanguage?: string | null,
     options?: { withVoice?: boolean; onFinalText?: (text: string) => void }
-  ): Promise<{ text: string; audio: string | null; serverMs?: Record<string, number> | null } | null> => {
+  ): Promise<{ text: string; audio: string | null; serverMs?: Record<string, number> | null; wrap?: WrapKind | null } | null> => {
     if (!sessionId) return null
 
     try {
@@ -552,6 +559,7 @@ export function useApi() {
       let fullResponse = ''
       let audioBase64: string | null = null
       let serverMs: Record<string, number> | null = null // how long the server spent on each step (see [TIMING])
+      let wrap: WrapKind | null = null // the server thinks this is a natural point to change topic or stop
       let finalTextAnnounced = false
       let buffer = '' // events can span several network chunks (the voice is one big event)
 
@@ -610,6 +618,10 @@ export function useApi() {
                 audioBase64 = data.audio
                 continue
               }
+              if (data.type === 'wrap' && (data.kind === 'switch' || data.kind === 'end')) {
+                wrap = data.kind
+                continue
+              }
               if (data.type === 'timings' && data.ms && typeof data.ms === 'object') {
                 serverMs = data.ms
                 continue
@@ -634,7 +646,7 @@ export function useApi() {
         }
       }
 
-      return { text: fullResponse, audio: audioBase64, serverMs }
+      return { text: fullResponse, audio: audioBase64, serverMs, wrap }
     } catch (err) {
       console.error('AI response error:', err)
     }
@@ -1110,6 +1122,26 @@ export function useApi() {
     }
   }, [sessionId, sendWithRecovery])
 
+  /** "New topic": the server picks a subject they have not just had and returns a spoken line that opens it. */
+  const newTopic = useCallback(async (): Promise<{ text: string; audio: string | null } | null> => {
+    if (!sessionId) return null
+    try {
+      const res = await sendWithRecovery(() => fetchWithTimeout(`${API_BASE}/conversation/new-topic`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, tts_speed: getActualSpeed(audioSpeed, targetLanguage) }),
+      }, RESPOND_TIMEOUT_MS))
+      if (!res.ok) return null
+      const data = await res.json()
+      const text = typeof data?.text === 'string' ? data.text.trim() : ''
+      if (!text) return null
+      return { text, audio: typeof data?.audio === 'string' && data.audio ? data.audio : null }
+    } catch (err) {
+      console.error('New topic error:', err)
+      return null
+    }
+  }, [sessionId, sendWithRecovery, audioSpeed, targetLanguage])
+
   return {
     fetchUserStats,
     logEvent,
@@ -1118,6 +1150,7 @@ export function useApi() {
     transcribeAudio,
     transcribeAudioChunk,
     getAiResponse,
+    newTopic,
     textToSpeech,
     generateImprovementAudio,
     stopAudio,

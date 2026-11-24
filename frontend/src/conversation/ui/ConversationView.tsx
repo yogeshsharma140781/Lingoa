@@ -6,6 +6,7 @@ import { Languages, MessagesSquare, MoreHorizontal, Play, Volume2, X } from 'luc
 import { Fragment, useEffect, useRef } from 'react'
 import { REACTION_FALLBACKS } from '../config'
 import { describeState, type ConversationState } from '../stateMachine'
+import type { WrapKind } from '../../hooks/useApi'
 import type { AiLine, Evaluation, Hints } from '../types'
 import { Avatar, type AvatarProps } from './Avatar'
 import type { FacePose } from './AvatarFace'
@@ -32,6 +33,12 @@ export interface ConversationViewProps {
   autoContinue?: boolean
   /** The learner opened the hint for this line: keep it on screen, whatever the mic hears. */
   hintPinned?: boolean
+  /** Why the learner is being asked "keep going, new topic or finish?" (the card shows in the wrapOffer state). */
+  wrapKind?: WrapKind | null
+  /** A new topic can be offered (not in a role-play). */
+  canChangeTopic?: boolean
+  /** They have already spoken enough for today's goal. */
+  goalReached?: boolean
   renderAvatarInner?: AvatarProps['renderInner']
 
   onClose: () => void
@@ -48,6 +55,9 @@ export interface ConversationViewProps {
   onContinue: () => void
   onTryAgain: () => void
   onSkip: () => void
+  onKeepGoing?: () => void
+  onNewTopic?: () => void
+  onFinish?: () => void
 }
 
 // Bar heights (px) for the waveform at full level; the level scales them.
@@ -158,6 +168,46 @@ function facePose(state: ConversationState): FacePose {
   }
 }
 
+/**
+ * "Keep going, new topic or finish?", pinned at the bottom when the conversation reaches a natural pause.
+ * After a topic has run dry the likely wish is a new one; after a natural ending, to finish. That one is the
+ * big button; the others sit under it as text.
+ */
+function WrapOffer({
+  kind, canChangeTopic, goalReached, primaryRef, onKeepGoing, onNewTopic, onFinish,
+}: {
+  kind: WrapKind
+  canChangeTopic: boolean
+  goalReached: boolean
+  primaryRef: React.RefObject<HTMLButtonElement>
+  onKeepGoing?: () => void
+  onNewTopic?: () => void
+  onFinish?: () => void
+}) {
+  const ending = kind === 'end' || !canChangeTopic
+  const title = ending ? 'That felt like a good place to stop.' : 'Want to talk about something else?'
+  const sub = goalReached ? null : "You haven't reached today's goal yet."
+  return (
+    <div className="conv-footer" role="group" aria-label="What next?">
+      <p className="conv-wrap-title">{title}</p>
+      {sub && <p className="conv-wrap-sub">{sub}</p>}
+      {ending ? (
+        <>
+          <button ref={primaryRef} type="button" className="conv-primary" onClick={onFinish}>Finish</button>
+          {canChangeTopic && <button type="button" className="conv-text-btn" onClick={onNewTopic}>New topic</button>}
+          <button type="button" className="conv-text-btn" onClick={onKeepGoing}>Keep going</button>
+        </>
+      ) : (
+        <>
+          <button ref={primaryRef} type="button" className="conv-primary" onClick={onNewTopic}>New topic</button>
+          <button type="button" className="conv-text-btn" onClick={onKeepGoing}>Keep going</button>
+          <button type="button" className="conv-text-btn" onClick={onFinish}>Finish</button>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function ConversationView(props: ConversationViewProps) {
   const {
     state, language, scenarioTitle, personaName, aiLine, showTranslation, evaluation, hints,
@@ -179,8 +229,10 @@ export function ConversationView(props: ConversationViewProps) {
   const hintCardRef = useRef<HTMLElement>(null)
   const previousName = useRef(state.name)
   const continueRef = useRef<HTMLButtonElement>(null)
+  const wrapPrimaryRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (state.name === 'feedback') continueRef.current?.focus({ preventScroll: true })
+    if (state.name === 'wrapOffer') wrapPrimaryRef.current?.focus({ preventScroll: true })
   }, [state.name])
 
   const listeningStates = ['userListening', 'userWaiting', 'hintShown', 'userSpeaking']
@@ -374,6 +426,17 @@ export function ConversationView(props: ConversationViewProps) {
       </div>
 
       {/* Pinned at the bottom, outside the scroll area. */}
+      {view.showWrapOffer && (
+        <WrapOffer
+          kind={props.wrapKind ?? 'switch'}
+          canChangeTopic={props.canChangeTopic ?? true}
+          goalReached={props.goalReached ?? false}
+          primaryRef={wrapPrimaryRef}
+          onKeepGoing={props.onKeepGoing}
+          onNewTopic={props.onNewTopic}
+          onFinish={props.onFinish}
+        />
+      )}
       {((view.showContinue && !props.autoContinue) || view.showRetry) && (
         <div className="conv-footer">
           {view.showContinue && !props.autoContinue && (

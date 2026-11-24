@@ -333,6 +333,9 @@
   align-items: center;
   gap: 4px;
 }
+.conv-wrap-title { margin: 0; font-size: 1.0625rem; font-weight: 600; color: #111; text-align: center; }
+.conv-wrap-sub { margin: 0 0 8px; font-size: 0.9375rem; color: #555; text-align: center; }
+.conv-wrap-title + .conv-primary { margin-top: 10px; }
 .conv-primary {
   width: 100%;
   min-height: 50px;

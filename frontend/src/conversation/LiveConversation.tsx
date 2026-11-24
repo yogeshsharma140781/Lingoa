@@ -12,7 +12,7 @@
 
 import { Capacitor } from '@capacitor/core'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { API_BASE, stopAllAudio, unlockAudio, useApi } from '../hooks/useApi'
+import { API_BASE, stopAllAudio, unlockAudio, useApi, type WrapKind } from '../hooks/useApi'
 import { cancelTodayReminder, hasSeenNotificationPrompt } from '../hooks/useNotifications'
 import { useVoiceActivity } from '../hooks/useVoiceActivity'
 import { TOPICS, useStore } from '../store'
@@ -43,7 +43,7 @@ const MIN_SPEECH_MS = DEFAULT_TURN_CONFIG.minSpeechDuration * 1000
 const REAL_SPEECH_MS = 2200
 
 type Transcription = { text: string; detectedLanguage?: string | null } | null
-type Reply = { text: string; audio: string | null; serverMs?: Record<string, number> | null } | null
+type Reply = { text: string; audio: string | null; serverMs?: Record<string, number> | null; wrap?: WrapKind | null } | null
 /** A reply being fetched, with the timings kept for the [Timing] log (see playNextReply). */
 type PendingReply = {
   promise: Promise<Reply>
@@ -93,6 +93,10 @@ export function LiveConversation() {
   const [micLevel, setMicLevel] = useState(0)
   // Touching a control on the feedback screen stops its "move on by itself" timer.
   const [autoPaused, setAutoPaused] = useState(false)
+  // Why the "keep going / new topic / finish" card is up (null when it is not).
+  const [wrapKind, setWrapKind] = useState<WrapKind | null>(null)
+  // A role-play is one scene: there is no other topic to switch to.
+  const isRoleplay = useStore((s) => !!(s.customScenario || s.selectedRoleplayId))
 
   // ---- turn bookkeeping (refs: read by timers and callbacks) ----
   const taker = useMemo(() => new TurnTaker(DEFAULT_TURN_CONFIG, language), [language])
@@ -486,10 +490,17 @@ export function LiveConversation() {
       // We heard them but no reply came back: go back to listening rather than hang.
       apiRef.current.logEvent('turn_failed', { stage: 'respond', ui: 'v2' })
     }
-    if (!closingRef.current) {
-      cueNextOpenRef.current = true
-      send({ type: 'AI_AUDIO_ENDED' })
+    if (closingRef.current) return
+    if (reply?.wrap) {
+      // A natural place to change topic or stop: ask, instead of opening the mic.
+      setWrapKind(reply.wrap)
+      const s = useStore.getState()
+      apiRef.current.logEvent('wrap_offered', { kind: reply.wrap, turns: turnIndexRef.current, speaking_ms: Math.round(s.speakingTime), ui: 'v2' })
+      send({ type: 'WRAP_OFFERED' })
+      return
     }
+    cueNextOpenRef.current = true
+    send({ type: 'AI_AUDIO_ENDED' })
   }, [send])
 
   // ---- start ----
@@ -574,6 +585,7 @@ export function LiveConversation() {
       : st === 'aiSpeaking' ? 'ai_speaking'
       : st === 'userSpeaking' ? 'mid_answer'
       : st === 'feedback' ? 'after_correction'
+      : st === 'wrapOffer' ? 'wrap_offer'
       : st === 'hintShown' ? 'suggestions_open'
       : turnIndexRef.current === 0 ? 'before_first_speech'
       : 'waiting_to_speak'
@@ -630,7 +642,7 @@ export function LiveConversation() {
       await apiRef.current.textToSpeech(text)
       // (If another replay started meanwhile, that one hands the turn back.)
       if (!closingRef.current && replayIdRef.current === id) send({ type: 'AI_AUDIO_ENDED' })
-    } else if (name === 'feedback') {
+    } else if (name === 'feedback' || name === 'wrapOffer') {
       apiRef.current.logEvent('ai_replayed', { ui: 'v2' })
       await apiRef.current.textToSpeech(text)
     }
@@ -726,6 +738,41 @@ export function LiveConversation() {
     const id = window.setTimeout(() => onContinue(), DEFAULT_TURN_CONFIG.autoContinueDelay * 1000)
     return () => window.clearTimeout(id)
   }, [autoAdvance, onContinue])
+  // ---- the "keep going / new topic / finish" card ----
+  const onKeepGoing = useCallback(() => {
+    if (stateRef.current.name !== 'wrapOffer') return
+    apiRef.current.logEvent('wrap_keep_going', { kind: wrapKind, ui: 'v2' })
+    setWrapKind(null)
+    cueNextOpenRef.current = true
+    send({ type: 'KEEP_GOING' })
+  }, [send, wrapKind])
+
+  const onFinish = useCallback(() => {
+    if (stateRef.current.name !== 'wrapOffer') return
+    apiRef.current.logEvent('wrap_finish', { kind: wrapKind, ui: 'v2' })
+    handleClose()
+  }, [handleClose, wrapKind])
+
+  const onNewTopic = useCallback(async () => {
+    if (stateRef.current.name !== 'wrapOffer') return
+    apiRef.current.logEvent('wrap_new_topic', { kind: wrapKind, ui: 'v2' })
+    setWrapKind(null)
+    send({ type: 'NEW_TOPIC' }) // she speaks next, as after any reply
+    const line = await apiRef.current.newTopic()
+    if (closingRef.current) return
+    if (line) {
+      setAiLine({ text: line.text, translation: '' })
+      setShowTranslation(false)
+      useStore.getState().addMessage('assistant', line.text)
+      await apiRef.current.textToSpeech(line.text, undefined, line.audio ?? undefined)
+    }
+    // (If no new line could be made, carry on with the old one rather than leave them stuck.)
+    if (!closingRef.current) {
+      cueNextOpenRef.current = true
+      send({ type: 'AI_AUDIO_ENDED' })
+    }
+  }, [send, wrapKind])
+
   const onScreenTap = useCallback(
     (e: React.MouseEvent) => {
       if (!autoAdvance) return
@@ -780,6 +827,12 @@ export function LiveConversation() {
         playing={playing}
         showLiveTranscript={DEFAULT_TURN_CONFIG.showLiveTranscript}
         autoContinue={autoAdvance}
+        wrapKind={wrapKind}
+        canChangeTopic={!isRoleplay}
+        goalReached={speakingTime >= targetTime}
+        onKeepGoing={onKeepGoing}
+        onNewTopic={onNewTopic}
+        onFinish={onFinish}
         onClose={handleClose}
         onOpenTranscript={() => { apiRef.current.logEvent('history_opened', { ui: 'v2' }); setSheetOpen(true) }}
         onReplay={onReplay}

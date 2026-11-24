@@ -39,3 +39,4 @@ export type ConversationStateName =
   | 'resting'
   | 'processing'
   | 'feedback'
+  | 'wrapOffer'

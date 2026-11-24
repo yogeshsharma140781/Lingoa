@@ -27,7 +27,7 @@ const EVALUATIONS: Record<'excellent' | 'good' | 'almost' | 'retry', Evaluation>
   retry: { transcript: 'Mag ik… eh… cap', level: 'retry', reaction: 'Probeer het nog eens', alternative: null, changedWords: [] },
 }
 
-const JUMPS: Array<{ label: string; state: ConversationState }> = [
+const JUMPS: Array<{ label: string; state: ConversationState; wrapKind?: 'switch' | 'end' }> = [
   { label: 'aiSpeaking', state: { name: 'aiSpeaking' } },
   { label: 'userListening', state: { name: 'userListening' } },
   { label: 'userSpeaking', state: { name: 'userSpeaking' } },
@@ -39,6 +39,8 @@ const JUMPS: Array<{ label: string; state: ConversationState }> = [
   { label: 'feedback · good', state: { name: 'feedback', level: 'good' } },
   { label: 'feedback · almost', state: { name: 'feedback', level: 'almost' } },
   { label: 'feedback · retry', state: { name: 'feedback', level: 'retry' } },
+  { label: 'wrapOffer · switch', state: { name: 'wrapOffer' } },
+  { label: 'wrapOffer · end', state: { name: 'wrapOffer' }, wrapKind: 'end' },
 ]
 
 const SIZES: Array<{ label: string; w: number; h: number }> = [
@@ -59,6 +61,7 @@ export default function ConversationGallery() {
   const [debug, setDebug] = useState(true)
   const [level, setLevel] = useState(0.5)
   const [animateMic, setAnimateMic] = useState(true)
+  const [wrapKind, setWrapKind] = useState<'switch' | 'end'>('switch')
   const [aiLen, setAiLen] = useState<keyof typeof AI_LINES>('short')
 
   const fire = (event: ConversationEvent) => setState((s) => transition(s, event))
@@ -88,7 +91,7 @@ export default function ConversationGallery() {
           {JUMPS.map((j) => {
             const on = j.state.name === state.name && (j.state.name !== 'feedback' || (state.name === 'feedback' && j.state.level === state.level))
             return (
-              <button key={j.label} onClick={() => setState(j.state)} style={{ textAlign: 'left', padding: '6px 10px', borderRadius: 6, border: '1px solid #bbb', background: on ? '#111' : '#fff', color: on ? '#fff' : '#111', cursor: 'pointer' }}>
+              <button key={j.label} onClick={() => { setState(j.state); if (j.state.name === 'wrapOffer') setWrapKind(j.wrapKind ?? 'switch') }} style={{ textAlign: 'left', padding: '6px 10px', borderRadius: 6, border: '1px solid #bbb', background: on ? '#111' : '#fff', color: on ? '#fff' : '#111', cursor: 'pointer' }}>
                 {j.label}
               </button>
             )
@@ -133,6 +136,11 @@ export default function ConversationGallery() {
             playing={playing}
             showLiveTranscript={DEFAULT_TURN_CONFIG.showLiveTranscript}
             autoContinue={state.name === 'feedback' && state.level === 'excellent'}
+            wrapKind={wrapKind}
+            goalReached={false}
+            onKeepGoing={() => fire({ type: 'KEEP_GOING' })}
+            onNewTopic={() => fire({ type: 'NEW_TOPIC' })}
+            onFinish={() => setState(initialState)}
             onClose={() => setState(initialState)}
             onOpenTranscript={() => setSheetOpen(true)}
             onReplay={() => {

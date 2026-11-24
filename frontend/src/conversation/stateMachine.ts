@@ -13,6 +13,8 @@ export type ConversationState =
   | { name: 'resting' }
   | { name: 'processing' }
   | { name: 'feedback'; level: EvaluationLevel }
+  /** The AI's line has played and the conversation looks ready to change topic or stop: the learner chooses. */
+  | { name: 'wrapOffer' }
 
 export type ConversationEvent =
   | { type: 'AI_AUDIO_STARTED' }
@@ -31,6 +33,12 @@ export type ConversationEvent =
   | { type: 'CONTINUE' }
   | { type: 'TRY_AGAIN' }
   | { type: 'SKIP' }
+  /** The AI finished speaking and the conversation is at a natural stopping point: ask instead of listening. */
+  | { type: 'WRAP_OFFERED' }
+  /** "Keep going": back to the usual listening. */
+  | { type: 'KEEP_GOING' }
+  /** "New topic": the AI speaks a line that opens a new subject. */
+  | { type: 'NEW_TOPIC' }
 
 export const initialState: ConversationState = { name: 'aiSpeaking' }
 
@@ -42,6 +50,12 @@ export function transition(state: ConversationState, event: ConversationEvent): 
   switch (state.name) {
     case 'aiSpeaking':
       if (event.type === 'AI_AUDIO_ENDED') return { name: 'userListening' }
+      if (event.type === 'WRAP_OFFERED') return { name: 'wrapOffer' }
+      return state
+
+    case 'wrapOffer':
+      if (event.type === 'KEEP_GOING') return { name: 'userListening' }
+      if (event.type === 'NEW_TOPIC') return { name: 'aiSpeaking' }
       return state
 
     case 'userListening':
@@ -120,6 +134,8 @@ export interface StateView {
   showContinue: boolean
   /** 'Try again' and 'Skip' (feedback with level 'retry'). */
   showRetry: boolean
+  /** The card that asks "keep going, new topic, or finish?" (wrapOffer only). */
+  showWrapOffer: boolean
   /** Tapping the avatar does something (resting). */
   avatarTappable: boolean
   /** A screen-reader announcement for entering this state. */
@@ -140,6 +156,7 @@ const BASE: StateView = {
   showTranscript: false,
   showContinue: false,
   showRetry: false,
+  showWrapOffer: false,
   avatarTappable: false,
   announcement: '',
 }
@@ -206,6 +223,8 @@ export function describeState(state: ConversationState): StateView {
         showRetry: state.level === 'retry',
         announcement: 'Feedback',
       }
+    case 'wrapOffer':
+      return { ...BASE, showWrapOffer: true, announcement: 'Keep going, try a new topic, or finish?' }
   }
 }
 
@@ -218,4 +237,5 @@ export const STATE_NAMES: ConversationStateName[] = [
   'resting',
   'processing',
   'feedback',
+  'wrapOffer',
 ]

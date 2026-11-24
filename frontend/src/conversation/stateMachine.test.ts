@@ -186,3 +186,41 @@ describe('autoContinues (a fine answer moves on by itself)', () => {
     expect(autoContinues({ name: 'processing' }, false)).toBe(false)
   })
 })
+
+describe('the wrap offer (keep going, new topic or finish)', () => {
+  const view = (name: ConversationState['name']) =>
+    describeState(name === 'feedback' ? { name, level: 'good' } : ({ name } as ConversationState))
+
+  it('replaces listening after the AI has spoken, and the mic stays shut', () => {
+    const s = run(initialState, { type: 'WRAP_OFFERED' })
+    expect(s.name).toBe('wrapOffer')
+    expect(describeState(s).micOpen).toBe(false)
+  })
+
+  it('"keep going" goes back to listening', () => {
+    expect(run(initialState, { type: 'WRAP_OFFERED' }, { type: 'KEEP_GOING' }).name).toBe('userListening')
+  })
+
+  it('"new topic" has the AI speak again, then the learner listens as usual', () => {
+    const s = run(initialState, { type: 'WRAP_OFFERED' }, { type: 'NEW_TOPIC' })
+    expect(s.name).toBe('aiSpeaking')
+    expect(transition(s, { type: 'AI_AUDIO_ENDED' }).name).toBe('userListening')
+  })
+
+  it('ignores everything else while the offer is up (a replay, a late audio event)', () => {
+    const offer = run(initialState, { type: 'WRAP_OFFERED' })
+    for (const type of ['AI_AUDIO_STARTED', 'AI_AUDIO_ENDED', 'SPEECH_STARTED', 'CONTINUE', 'WAITING_TIMEOUT'] as const) {
+      expect(transition(offer, { type })).toBe(offer)
+    }
+  })
+
+  it('is only offered after the AI spoke', () => {
+    for (const s of [{ name: 'userListening' }, { name: 'userSpeaking' }, { name: 'processing' }] as ConversationState[]) {
+      expect(transition(s, { type: 'WRAP_OFFERED' })).toBe(s)
+    }
+  })
+
+  it('shows the card only in its own state', () => {
+    expect(STATE_NAMES.filter((n) => view(n).showWrapOffer)).toEqual(['wrapOffer'])
+  })
+})
