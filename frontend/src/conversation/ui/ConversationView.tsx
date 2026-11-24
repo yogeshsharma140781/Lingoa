@@ -55,7 +55,6 @@ export interface ConversationViewProps {
   onSkip: () => void
   onKeepGoing?: () => void
   onNewTopic?: () => void
-  onFinish?: () => void
 }
 
 // Bar heights (px) for the waveform at full level; the level scales them.
@@ -172,18 +171,17 @@ function facePose(state: ConversationState): FacePose {
  * big button; the others sit under it as text.
  */
 function WrapOffer({
-  kind, goalReached, primaryRef, onKeepGoing, onNewTopic, onFinish,
+  kind, goalReached, primaryRef, onKeepGoing, onNewTopic,
 }: {
   kind: WrapKind
   goalReached: boolean
   primaryRef: React.RefObject<HTMLButtonElement>
   onKeepGoing?: () => void
   onNewTopic?: () => void
-  onFinish?: () => void
 }) {
   // Whatever the reason (the talk ran dry or reached its natural end), the first choice is always a new
   // topic, so it never feels like being sent home. From a role-play, "New topic" leaves the scene.
-  const title = kind === 'end' ? 'That felt like a good place to stop.' : 'Want to talk about something else?'
+  const title = kind === 'end' ? 'Nice! Want to try something new?' : 'Want to talk about something else?'
   const sub = goalReached ? null : "You haven't reached today's goal yet."
   return (
     <div className="conv-footer" role="group" aria-label="What next?">
@@ -191,7 +189,6 @@ function WrapOffer({
       {sub && <p className="conv-wrap-sub">{sub}</p>}
       <button ref={primaryRef} type="button" className="conv-primary" onClick={onNewTopic}>New topic</button>
       <button type="button" className="conv-text-btn" onClick={onKeepGoing}>Keep going</button>
-      <button type="button" className="conv-text-btn" onClick={onFinish}>Finish</button>
     </div>
   )
 }
@@ -421,7 +418,6 @@ export function ConversationView(props: ConversationViewProps) {
           primaryRef={wrapPrimaryRef}
           onKeepGoing={props.onKeepGoing}
           onNewTopic={props.onNewTopic}
-          onFinish={props.onFinish}
         />
       )}
       {((view.showContinue && !props.autoContinue) || view.showRetry) && (

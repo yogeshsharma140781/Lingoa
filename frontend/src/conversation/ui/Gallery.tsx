@@ -140,7 +140,6 @@ export default function ConversationGallery() {
             goalReached={false}
             onKeepGoing={() => fire({ type: 'KEEP_GOING' })}
             onNewTopic={() => fire({ type: 'NEW_TOPIC' })}
-            onFinish={() => setState(initialState)}
             onClose={() => setState(initialState)}
             onOpenTranscript={() => setSheetOpen(true)}
             onReplay={() => {

@@ -569,7 +569,9 @@ export function LiveConversation() {
   useEffect(() => () => { stopAllAudio() }, [])
 
   // ---- what the buttons do ----
-  const handleClose = useCallback(() => {
+  // Leave the conversation: stop everything, save the session in the background and go to `destination`
+  // ('home' with the kind word, or back to where the next topic or scene is chosen).
+  const leave = useCallback((destination: 'home' | 'topics' | 'roleplay') => {
     if (closingRef.current) return
     closingRef.current = true
     micOnRef.current = false
@@ -603,9 +605,10 @@ export function LiveConversation() {
     })
     // Leave them with a kind word on the home screen, and leave RIGHT NOW. Saving the session on the
     // server can take seconds (longer if it is waking up), so that happens in the background.
-    if (speakingMs > 0) s.setSessionWrapUp({ speakingMs, hitGoal, languageCode: language })
+    // The kind word belongs on the home screen: on the way to choosing something else it would turn up later, out of place.
+    if (speakingMs > 0 && destination === 'home') s.setSessionWrapUp({ speakingMs, hitGoal, languageCode: language })
     s.resetSession()
-    s.setScreen('home')
+    s.setScreen(destination)
     if (speakingMs > 0) {
       endSession(speakingMs)
         .then((result) => {
@@ -617,6 +620,8 @@ export function LiveConversation() {
         .catch((err) => console.error('Error ending session:', err))
     }
   }, [releaseMic])
+
+  const handleClose = useCallback(() => leave('home'), [leave])
 
   const goBack = useCallback(() => {
     const s = useStore.getState()
@@ -745,31 +750,14 @@ export function LiveConversation() {
     send({ type: 'KEEP_GOING' })
   }, [send, wrapKind])
 
-  const onFinish = useCallback(() => {
+  // "New topic": back to where it was chosen (the topics, or the role-play scenes), so they pick the next one.
+  const onNewTopic = useCallback(() => {
     if (stateRef.current.name !== 'wrapOffer') return
-    apiRef.current.logEvent('wrap_finish', { kind: wrapKind, ui: 'v2' })
-    handleClose()
-  }, [handleClose, wrapKind])
-
-  const onNewTopic = useCallback(async () => {
-    if (stateRef.current.name !== 'wrapOffer') return
-    apiRef.current.logEvent('wrap_new_topic', { kind: wrapKind, ui: 'v2' })
-    setWrapKind(null)
-    send({ type: 'NEW_TOPIC' }) // she speaks next, as after any reply
-    const line = await apiRef.current.newTopic()
-    if (closingRef.current) return
-    if (line) {
-      setAiLine({ text: line.text, translation: '' })
-      setShowTranslation(false)
-      useStore.getState().addMessage('assistant', line.text)
-      await apiRef.current.textToSpeech(line.text, undefined, line.audio ?? undefined)
-    }
-    // (If no new line could be made, carry on with the old one rather than leave them stuck.)
-    if (!closingRef.current) {
-      cueNextOpenRef.current = true
-      send({ type: 'AI_AUDIO_ENDED' })
-    }
-  }, [send, wrapKind])
+    const s = useStore.getState()
+    const destination = s.selectedRoleplayId || s.customScenario ? 'roleplay' : 'topics'
+    apiRef.current.logEvent('wrap_new_topic', { kind: wrapKind, destination, ui: 'v2' })
+    leave(destination)
+  }, [leave, wrapKind])
 
   const onScreenTap = useCallback(
     (e: React.MouseEvent) => {
@@ -829,7 +817,6 @@ export function LiveConversation() {
         goalReached={speakingTime >= targetTime}
         onKeepGoing={onKeepGoing}
         onNewTopic={onNewTopic}
-        onFinish={onFinish}
         onClose={handleClose}
         onOpenTranscript={() => { apiRef.current.logEvent('history_opened', { ui: 'v2' }); setSheetOpen(true) }}
         onReplay={onReplay}
