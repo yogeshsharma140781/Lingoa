@@ -2480,12 +2480,14 @@ class NewTopicRequest(BaseModel):
 @app.post("/api/conversation/new-topic")
 async def new_topic(data: NewTopicRequest):
     """The learner chose "New topic": pick a subject they have not just had and say a short line that
-    closes the old one and opens the new one. The session (and so their speaking time) carries on."""
+    closes the old one and opens the new one. The session (and so their speaking time) carries on.
+    From a role-play this leaves the scene and carries on as an ordinary conversation on the new topic."""
     session = sessions.get(data.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.get("roleplay_id") or session.get("custom_scenario"):
-        raise HTTPException(status_code=400, detail="A role-play has no topic to change")
+        session["roleplay_id"] = None
+        session["custom_scenario"] = None
 
     language = session.get("target_language", "en")
     language_name = LANGUAGE_NAMES.get(language, "the target language")

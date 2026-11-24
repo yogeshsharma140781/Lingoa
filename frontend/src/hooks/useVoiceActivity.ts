@@ -20,6 +20,14 @@ interface UseVoiceActivityOptions {
   onFrame?: (frame: { voiced: boolean; level: number }) => void
 }
 
+// The lowest average analyser level (0..255) that counts as the microphone giving a signal. Healthy windows
+// logged on a phone averaged 13 to 32; a deaf microphone gave 0.5.
+const MIN_LIVE_LEVEL = 3
+
+// "[Mic 13:41:22]": the time of day on every microphone log line, so a pasted log shows when each line was
+// written (and whether it belongs to the moment something went wrong).
+const micTag = () => `[Mic ${new Date().toLocaleTimeString('en-GB')}]`
+
 export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
   const {
     silenceThreshold = -15, // Very high threshold - requires clear speech, strongly filters background noise
@@ -199,13 +207,13 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       const track0 = stream.getAudioTracks()[0]
       lastDeviceIdRef.current = track0?.getSettings?.().deviceId ?? null
       console.log(
-        '[Mic] opened; audio context:', ctx.state, 'track muted:', track0?.muted,
+        micTag(), 'opened; audio context:', ctx.state, 'track muted:', track0?.muted,
         'rates ctx/mic:', ctx.sampleRate, micRate, plainMic ? '(plain mic)' : '', otherDevice ? '(other device)' : '',
         'input:', JSON.stringify(track0?.label ?? ''),
       )
       // Every input the phone offers right now, to see what iOS has connected (headphones, Bluetooth...).
       navigator.mediaDevices.enumerateDevices().then(
-        (all) => console.log('[Mic] inputs:', JSON.stringify(all.filter((d) => d.kind === 'audioinput').map((d) => d.label || d.deviceId.slice(0, 6)))),
+        (all) => console.log(micTag(), 'inputs:', JSON.stringify(all.filter((d) => d.kind === 'audioinput').map((d) => d.label || d.deviceId.slice(0, 6)))),
         () => {},
       )
       analyserRef.current = audioContextRef.current.createAnalyser()
@@ -339,7 +347,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
     cleanupMedia()
     // Nothing should be capturing now: stop any stream that slipped through (see micTracker).
     const strays = stopStrayMicStreams(null)
-    if (strays) console.warn('[Mic] stopped', strays, 'stray microphone stream(s) on release')
+    if (strays) console.warn(micTag(), 'stopped', strays, 'stray microphone stream(s) on release')
   }, [stopRecording, cleanupMedia])
 
   // Reliable stop + blob retrieval (waits for MediaRecorder to flush final chunk).
@@ -462,7 +470,11 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
 
     // Calculate average volume
     const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-    if (average > 0) {
+    // A live microphone always shows some level, even in a quiet room (the phone turns the volume up),
+    // while a deaf one gives exact silence or only the odd tiny blip (one logged window: average 0.5, peak
+    // -36 dB, while the user was talking). A blip that small must not count as a signal, or the watchdog
+    // never sees the mic as dead.
+    if (average >= MIN_LIVE_LEVEL) {
       lastSignalAtRef.current = Date.now()
       silentRestartsRef.current = 0
     }
@@ -650,7 +662,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       if (now - st.loggedAt >= 5000) {
         if (st.loggedAt && st.n) {
           console.log(
-            '[Mic] level avg', (st.sum / st.n).toFixed(1), 'max dB', st.max.toFixed(1),
+            micTag(), 'level avg', (st.sum / st.n).toFixed(1), 'max dB', st.max.toFixed(1),
             'floor', noiseFloorRef.current.toFixed(1),
             'ctx', audioContextRef.current?.state,
             'track', streamRef.current?.getAudioTracks()[0]?.readyState,
@@ -683,7 +695,7 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       if (!unhealthySinceRef.current) {
         unhealthySinceRef.current = now
         console.warn(
-          '[Mic] looks unhealthy:', reason, 'context:', ctx?.state, 'track:', track?.readyState, 'muted:', track?.muted,
+          micTag(), 'looks unhealthy:', reason, 'context:', ctx?.state, 'track:', track?.readyState, 'muted:', track?.muted,
           'open capture streams:', liveMicStreamCount(),
         )
       }
@@ -703,10 +715,10 @@ export function useVoiceActivity(options: UseVoiceActivityOptions = {}) {
       }
       lastRestartAtRef.current = now
       unhealthySinceRef.current = 0
-      console.warn('[Mic] restarting the microphone:', reason)
+      console.warn(micTag(), 'restarting the microphone:', reason)
       // Any other open microphone stream has no owner: stop it (it may be what is blocking this one).
       const strays = stopStrayMicStreams(streamRef.current)
-      if (strays) console.warn('[Mic] stopped', strays, 'stray microphone stream(s)')
+      if (strays) console.warn(micTag(), 'stopped', strays, 'stray microphone stream(s)')
       if (reason === 'paused' && ctx) {
         // Resuming did not work: start over with a new audio context.
         ctx.close().catch(() => {})

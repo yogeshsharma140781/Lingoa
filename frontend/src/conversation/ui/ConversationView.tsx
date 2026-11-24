@@ -35,8 +35,6 @@ export interface ConversationViewProps {
   hintPinned?: boolean
   /** Why the learner is being asked "keep going, new topic or finish?" (the card shows in the wrapOffer state). */
   wrapKind?: WrapKind | null
-  /** A new topic can be offered (not in a role-play). */
-  canChangeTopic?: boolean
   /** They have already spoken enough for today's goal. */
   goalReached?: boolean
   renderAvatarInner?: AvatarProps['renderInner']
@@ -174,36 +172,26 @@ function facePose(state: ConversationState): FacePose {
  * big button; the others sit under it as text.
  */
 function WrapOffer({
-  kind, canChangeTopic, goalReached, primaryRef, onKeepGoing, onNewTopic, onFinish,
+  kind, goalReached, primaryRef, onKeepGoing, onNewTopic, onFinish,
 }: {
   kind: WrapKind
-  canChangeTopic: boolean
   goalReached: boolean
   primaryRef: React.RefObject<HTMLButtonElement>
   onKeepGoing?: () => void
   onNewTopic?: () => void
   onFinish?: () => void
 }) {
-  const ending = kind === 'end' || !canChangeTopic
-  const title = ending ? 'That felt like a good place to stop.' : 'Want to talk about something else?'
+  // Whatever the reason (the talk ran dry or reached its natural end), the first choice is always a new
+  // topic, so it never feels like being sent home. From a role-play, "New topic" leaves the scene.
+  const title = kind === 'end' ? 'That felt like a good place to stop.' : 'Want to talk about something else?'
   const sub = goalReached ? null : "You haven't reached today's goal yet."
   return (
     <div className="conv-footer" role="group" aria-label="What next?">
       <p className="conv-wrap-title">{title}</p>
       {sub && <p className="conv-wrap-sub">{sub}</p>}
-      {ending ? (
-        <>
-          <button ref={primaryRef} type="button" className="conv-primary" onClick={onFinish}>Finish</button>
-          {canChangeTopic && <button type="button" className="conv-text-btn" onClick={onNewTopic}>New topic</button>}
-          <button type="button" className="conv-text-btn" onClick={onKeepGoing}>Keep going</button>
-        </>
-      ) : (
-        <>
-          <button ref={primaryRef} type="button" className="conv-primary" onClick={onNewTopic}>New topic</button>
-          <button type="button" className="conv-text-btn" onClick={onKeepGoing}>Keep going</button>
-          <button type="button" className="conv-text-btn" onClick={onFinish}>Finish</button>
-        </>
-      )}
+      <button ref={primaryRef} type="button" className="conv-primary" onClick={onNewTopic}>New topic</button>
+      <button type="button" className="conv-text-btn" onClick={onKeepGoing}>Keep going</button>
+      <button type="button" className="conv-text-btn" onClick={onFinish}>Finish</button>
     </div>
   )
 }
@@ -429,7 +417,6 @@ export function ConversationView(props: ConversationViewProps) {
       {view.showWrapOffer && (
         <WrapOffer
           kind={props.wrapKind ?? 'switch'}
-          canChangeTopic={props.canChangeTopic ?? true}
           goalReached={props.goalReached ?? false}
           primaryRef={wrapPrimaryRef}
           onKeepGoing={props.onKeepGoing}

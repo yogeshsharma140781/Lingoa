@@ -95,8 +95,6 @@ export function LiveConversation() {
   const [autoPaused, setAutoPaused] = useState(false)
   // Why the "keep going / new topic / finish" card is up (null when it is not).
   const [wrapKind, setWrapKind] = useState<WrapKind | null>(null)
-  // A role-play is one scene: there is no other topic to switch to.
-  const isRoleplay = useStore((s) => !!(s.customScenario || s.selectedRoleplayId))
 
   // ---- turn bookkeeping (refs: read by timers and callbacks) ----
   const taker = useMemo(() => new TurnTaker(DEFAULT_TURN_CONFIG, language), [language])
@@ -828,7 +826,6 @@ export function LiveConversation() {
         showLiveTranscript={DEFAULT_TURN_CONFIG.showLiveTranscript}
         autoContinue={autoAdvance}
         wrapKind={wrapKind}
-        canChangeTopic={!isRoleplay}
         goalReached={speakingTime >= targetTime}
         onKeepGoing={onKeepGoing}
         onNewTopic={onNewTopic}
