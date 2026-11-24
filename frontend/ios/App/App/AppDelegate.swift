@@ -5,16 +5,9 @@ import AVFoundation
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
-    var window: UIWindow?
-
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Configure audio session to play audio even in silent mode (like Music app)
         configureAudioSession()
-        
-        // The app is white: match it, so nothing flashes behind the web view
-        if let window = self.window {
-            window.backgroundColor = UIColor.white
-        }
         
         return true
     }
@@ -58,19 +51,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
     }
 
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
-        
-        // Reactivate audio session when coming to foreground
-        configureAudioSession()
-    }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
-        
-        // Reconfigure and reactivate audio session to ensure audio plays even in silent mode
-        configureAudioSession()
-    }
+    // Coming forward (audio session) and opening links are handled in SceneDelegate: with the UIScene
+    // life cycle these app-level callbacks are no longer sent.
 
     func applicationWillTerminate(_ application: UIApplication) {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
