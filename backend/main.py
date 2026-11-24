@@ -448,7 +448,67 @@ LEARNER SPEECH ROBUSTNESS (NON-NEGOTIABLE):
 
 START IMMEDIATELY - no setup."""
 
+# Native phrasing: native speakers (Chinese and Hindi speakers, so far) said the AI's lines sound "translated
+# from English" ("translation tone"). Added to the end of every conversation prompt, for every language.
+NATIVE_PHRASING_RULES = """NATIVE PHRASING - CRITICAL (applies to every line you say):
+- Think in {language_name} from the start. Never compose the line in English and translate it. Word-for-word
+  English in {language_name} ("translation tone") sounds foreign and stiff to a native speaker.
+- Say what a native speaker would actually say in this situation, even when the wording is different from English.
+  Use ordinary spoken phrases, everyday word choices, particles and rhythm. Prefer short, common words.
+- Don't carry over English habits: "How was your day?" / "That sounds interesting" / "Can you tell me more?"
+  translated literally, a subject on every sentence, stock polite phrases, or English sentence order.
+- Plain and spoken beats correct and formal. If a phrase is something nobody says out loud, don't use it.
+{language_notes}"""
+
+NATIVE_PHRASING_NOTES = {
+    "zh": """- Chinese: drop the subject (我/你) when it is obvious. Use sentence-final particles (啊, 呢, 吧, 嘛, 呀) and
+  everyday words (挺…的, 还行, 特别, 怎么样). Avoid long 的 chains, 被 passives, and
+  formal words like 非常, 然而, 因此. Stiff -> natural:
+  你今天过得怎么样？ -> 今天怎么样？ | 你周末有什么计划吗？ -> 周末有什么安排吗？
+  那听起来非常有趣！ -> 听着挺有意思的！ | 你能告诉我更多吗？ -> 多说说？""",
+    "hi": """- Hindi: use spoken Hindustani, drop pronouns where people do, and use natural postposition and verb patterns
+  ("दिन कैसा रहा?"), not English word order. Avoid bookish and Sanskritised words. Stiff -> natural:
+  आपका दिन कैसा था? -> दिन कैसा रहा? | आपको क्या करना पसंद है? -> खाली टाइम में क्या करते हो?
+  मैं आपसे एक प्रश्न पूछना चाहती हूँ। -> एक बात पूछूँ? | यह बहुत रोचक लगता है। -> अरे वाह, ये तो बढ़िया है!""",
+    "nl": """- Dutch: use the small spoken words Dutch speakers use (even, maar, toch, eens, hè, nou), not English phrasing
+  such as "Dat klinkt interessant". Say "Leuk!", "Echt?", "Wat gezellig!" in the situation where a Dutch person would.""",
+    "es": """- Spanish: drop subject pronouns, and use everyday reactions (¡Qué bien!, ¿En serio?, ¿Y eso?, ¡Anda!) and
+  tags (¿no?, ¿verdad?). Avoid calques such as "Eso suena interesante".""",
+    "fr": """- French: spoken register: tu, on for "we", "ça" and short reactions (Ah bon ? Sérieux ? Pas mal !).
+  Avoid calques such as "Ça sonne intéressant".""",
+    "de": """- German: use the small spoken words (mal, doch, eigentlich, ja, halt, ne?) and reactions (Echt? Cool! Ach so!).
+  Avoid calques such as "Das klingt sehr interessant" in every turn.""",
+    "it": """- Italian: drop subject pronouns, and use everyday reactions (Davvero? Che bello! Ma dai!). Avoid calques such
+  as "Suona interessante".""",
+    "pt": """- Portuguese: use everyday spoken forms and reactions (Que legal! Sério? Nossa!) and drop subject pronouns
+  where people do. Avoid calques such as "Isso soa interessante".""",
+    "ja": """- Japanese: drop あなた and 私 (use the person's name or leave the subject out), use casual-polite です/ます speech
+  with あいづち (そうなんですね, へえ, いいですね), and avoid stiff "〜することができます".""",
+    "ko": """- Korean: never say 당신 (leave the subject out), use 해요체, with natural reactions (아, 그래요?, 진짜요?, 좋네요).
+  Avoid translated sentence order and stiff patterns.""",
+}
+
+
+def native_phrasing_block(language: str) -> str:
+    """The native-phrasing rules for one language (generic rules plus that language's own notes).
+    Empty for English: the rules are about not translating from English."""
+    if language == "en":
+        return ""
+    notes = NATIVE_PHRASING_NOTES.get(language, "")
+    return NATIVE_PHRASING_RULES.format(
+        language_name=LANGUAGE_NAMES.get(language, "the target language"),
+        language_notes=notes,
+    ).rstrip()
+
+
 def get_conversation_prompt(language: str, topic: str = "random", roleplay_id: str = None, custom_scenario: str = None) -> str:
+    """The conversation prompt (topic or role-play) plus the native-phrasing rules for the language."""
+    body = _conversation_prompt_body(language, topic, roleplay_id, custom_scenario)
+    block = native_phrasing_block(language)
+    return f"{body}\n\n{block}" if block else body
+
+
+def _conversation_prompt_body(language: str, topic: str = "random", roleplay_id: str = None, custom_scenario: str = None) -> str:
     """Get the appropriate conversation prompt - handles both topics and role-play"""
     
     # Role-play mode
@@ -1320,6 +1380,7 @@ async def conversation_hints(data: HintsRequest):
                     "content": (
                         f"You help a beginner who is practising {target_name} by speaking.\n"
                         "Give ONE natural reply the learner could say to the AI's last message.\n"
+                        "Phrase it the way a native speaker would say it out loud, never a word-for-word translation of English.\n"
                         f"- {target_name} only, spoken style, at most 8 words, simple enough for a beginner.\n"
                         "- Avoid words that reveal the speaker's gender.\n"
                         'Return JSON only: {"answer": "..."}'

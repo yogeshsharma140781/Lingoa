@@ -21,25 +21,35 @@ class ElevenLabsVoiceSettings:
     # a learner hears as "a different person each turn". Tune by ear: lower stability = livelier, less even.
     stability: float = 0.65          # Higher = steadier delivery
     similarity_boost: float = 0.80   # Higher = consistent identity
-    style: float = 0.10              # Lower = less exaggeration from sentence to sentence
-    use_speaker_boost: bool = True   # Enhances clarity
+    style: Optional[float] = 0.10    # Lower = less exaggeration from sentence to sentence (None = not sent)
+    use_speaker_boost: Optional[bool] = True   # Enhances clarity (None = not sent)
 
-# Default settings - can be tuned per language
-DEFAULT_VOICE_SETTINGS = ElevenLabsVoiceSettings()
-
-# Slightly more expressive settings for Hindi
-HINDI_VOICE_SETTINGS = ElevenLabsVoiceSettings(
-    stability=0.50,           # a little livelier than the other languages, still steady
+# Every language uses the same model and settings as ElevenLabs' own page for Eleven v4: stability 0.50,
+# similarity 0.75, and no style or speaker boost (they are not sent). A native Chinese speaker preferred this
+# over the earlier multilingual_v2 setup in a blind test.
+DEFAULT_VOICE_SETTINGS = ElevenLabsVoiceSettings(
+    stability=0.50,
     similarity_boost=0.75,
-    style=0.15,
-    use_speaker_boost=True
+    style=None,
+    use_speaker_boost=None,
 )
 
-# Language-specific voice settings
-LANGUAGE_VOICE_SETTINGS: Dict[str, ElevenLabsVoiceSettings] = {
-    "hi": HINDI_VOICE_SETTINGS,
-    # Add more language-specific settings as needed
-}
+# The settings used with the fallback model if v4 fails (what every language used before v4)
+FALLBACK_VOICE_SETTINGS = ElevenLabsVoiceSettings(
+    stability=0.65,
+    similarity_boost=0.80,
+    style=0.10,
+    use_speaker_boost=True,
+)
+
+# Language-specific voice settings: none, all languages share DEFAULT_VOICE_SETTINGS
+LANGUAGE_VOICE_SETTINGS: Dict[str, ElevenLabsVoiceSettings] = {}
+
+# ElevenLabs model: the same for every language, with a per-language override if one is ever needed.
+DEFAULT_MODEL_ID = "eleven_v4"
+LANGUAGE_MODEL_ID: Dict[str, str] = {}
+# If the model fails (outage, quota, not available), try this one with FALLBACK_VOICE_SETTINGS.
+FALLBACK_MODEL_ID = "eleven_multilingual_v2"
 
 # ElevenLabs Voice IDs - one dedicated voice per target language (each added to
 # this account's Voice Library), replacing the single shared voice used for
@@ -196,7 +206,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         if not self.api_key:
             raise ValueError("ElevenLabs API key not provided")
         self.base_url = "https://api.elevenlabs.io/v1"
-        self.model_id = "eleven_multilingual_v2"  # Best for non-English
+        self.model_id = DEFAULT_MODEL_ID
         print(f"[ELEVENLABS] Initialized with API key: {self.api_key[:10]}...{self.api_key[-4:]}")
         
     def _get_voice_id(self, language: str) -> str:
@@ -204,28 +214,36 @@ class ElevenLabsTTSProvider(TTSProvider):
         return ELEVENLABS_VOICE_MAP.get(language, ELEVENLABS_VOICE_MAP["en"])
     
     def _get_voice_settings(self, language: str) -> dict:
-        """Get voice settings for a language"""
+        """Get voice settings for a language (keys left as None are not sent)"""
         settings = LANGUAGE_VOICE_SETTINGS.get(language, DEFAULT_VOICE_SETTINGS)
-        return {
+        result = {
             "stability": settings.stability,
             "similarity_boost": settings.similarity_boost,
             "style": settings.style,
             "use_speaker_boost": settings.use_speaker_boost
         }
+        return {k: v for k, v in result.items() if v is not None}
+
+    def _get_model_id(self, language: str) -> str:
+        """The ElevenLabs model for a language"""
+        return LANGUAGE_MODEL_ID.get(language, self.model_id)
+
+    def _attempts(self, language: str) -> list[tuple[str, dict]]:
+        """(model, voice settings) to try, in order: the language's own, then the safe fallback."""
+        model = self._get_model_id(language)
+        attempts = [(model, self._get_voice_settings(language))]
+        if model != FALLBACK_MODEL_ID:
+            fallback = FALLBACK_VOICE_SETTINGS
+            attempts.append((FALLBACK_MODEL_ID, {
+                "stability": fallback.stability,
+                "similarity_boost": fallback.similarity_boost,
+                "style": fallback.style,
+                "use_speaker_boost": fallback.use_speaker_boost,
+            }))
+        return attempts
     
-    async def generate_speech(
-        self, 
-        text: str, 
-        language: str,
-        speed: float = 1.0
-    ) -> bytes:
-        """Generate speech using ElevenLabs"""
-        # Pre-process text for natural speech
-        processed_text = preprocess_text_for_speech(text, language)
-        
-        voice_id = self._get_voice_id(language)
-        voice_settings = self._get_voice_settings(language)
-        
+    async def _generate_once(self, text: str, voice_id: str, model_id: str, voice_settings: dict) -> bytes:
+        """One ElevenLabs request with one model. Raises on any failure."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/text-to-speech/{voice_id}",
@@ -235,29 +253,52 @@ class ElevenLabsTTSProvider(TTSProvider):
                     "Accept": "audio/mpeg"
                 },
                 json={
-                    "text": processed_text,
-                    "model_id": self.model_id,
+                    "text": text,
+                    "model_id": model_id,
                     "voice_settings": voice_settings
                 },
                 timeout=30.0
             )
-            
+
             if response.status_code != 200:
                 error_text = response.text[:500] if hasattr(response, 'text') else str(response.content[:500])
-                print(f"[ELEVENLABS ERROR] Status {response.status_code}: {error_text}")
-                
+                print(f"[ELEVENLABS ERROR] Model {model_id}, status {response.status_code}: {error_text}")
+
                 # If it's a 401 (unauthorized/blocked), raise a specific exception
                 if response.status_code == 401:
                     raise Exception(f"ElevenLabs account blocked or invalid API key. Status {response.status_code}: {error_text}")
-                
+
                 raise Exception(f"ElevenLabs API error: {response.status_code} - {error_text}")
-            
+
             if not response.content or len(response.content) == 0:
                 raise Exception("ElevenLabs returned empty audio")
-            
-            print(f"[ELEVENLABS] Generated {len(response.content)} bytes of audio")
+
+            print(f"[ELEVENLABS] Generated {len(response.content)} bytes of audio with {model_id}")
             return response.content
-    
+
+    async def generate_speech(
+        self, 
+        text: str, 
+        language: str,
+        speed: float = 1.0
+    ) -> bytes:
+        """Generate speech using ElevenLabs (the language's own model, then the fallback model)"""
+        # Pre-process text for natural speech
+        processed_text = preprocess_text_for_speech(text, language)
+        voice_id = self._get_voice_id(language)
+
+        attempts = self._attempts(language)
+        for index, (model_id, voice_settings) in enumerate(attempts):
+            try:
+                return await self._generate_once(processed_text, voice_id, model_id, voice_settings)
+            except Exception as e:
+                is_last = index == len(attempts) - 1
+                # A blocked or invalid key will fail with the other model too.
+                if is_last or "blocked or invalid API key" in str(e):
+                    raise
+                print(f"[ELEVENLABS] {model_id} failed for {language}, falling back to {attempts[index + 1][0]}")
+        raise Exception("ElevenLabs: no model attempted")  # unreachable: attempts is never empty
+
     async def stream_speech(
         self, 
         text: str, 
@@ -267,34 +308,42 @@ class ElevenLabsTTSProvider(TTSProvider):
         """Stream speech using ElevenLabs streaming API"""
         # Pre-process text for natural speech
         processed_text = preprocess_text_for_speech(text, language)
-        
         voice_id = self._get_voice_id(language)
-        voice_settings = self._get_voice_settings(language)
-        
-        async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/text-to-speech/{voice_id}/stream",
-                headers={
-                    "xi-api-key": self.api_key,
-                    "Content-Type": "application/json",
-                    "Accept": "audio/mpeg"
-                },
-                json={
-                    "text": processed_text,
-                    "model_id": self.model_id,
-                    "voice_settings": voice_settings,
-                    "optimize_streaming_latency": 3  # Maximum optimization
-                },
-                timeout=60.0
-            ) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    raise Exception(f"ElevenLabs streaming error: {response.status_code} - {error_text}")
-                
-                async for chunk in response.aiter_bytes(chunk_size=4096):
-                    if chunk:
-                        yield chunk
+
+        attempts = self._attempts(language)
+        for index, (model_id, voice_settings) in enumerate(attempts):
+            started = False  # once audio has been sent on, a retry would repeat the start of the line
+            try:
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.base_url}/text-to-speech/{voice_id}/stream",
+                        headers={
+                            "xi-api-key": self.api_key,
+                            "Content-Type": "application/json",
+                            "Accept": "audio/mpeg"
+                        },
+                        json={
+                            "text": processed_text,
+                            "model_id": model_id,
+                            "voice_settings": voice_settings,
+                            "optimize_streaming_latency": 3  # Maximum optimization
+                        },
+                        timeout=60.0
+                    ) as response:
+                        if response.status_code != 200:
+                            error_text = await response.aread()
+                            raise Exception(f"ElevenLabs streaming error: {response.status_code} - {error_text}")
+
+                        async for chunk in response.aiter_bytes(chunk_size=4096):
+                            if chunk:
+                                started = True
+                                yield chunk
+                return
+            except Exception as e:
+                if started or index == len(attempts) - 1:
+                    raise
+                print(f"[ELEVENLABS] {model_id} stream failed for {language} ({e}), falling back to {attempts[index + 1][0]}")
     
     async def generate_filler(self, language: str) -> tuple[str, bytes]:
         """Generate a thinking filler audio"""
