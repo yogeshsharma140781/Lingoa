@@ -55,6 +55,10 @@ let currentSource: AudioBufferSourceNode | null = null
 // caller hangs until the 60 s safety stop, which would then cut off whatever plays by that time.
 let finishPlayback: (() => void) | null = null
 let audioUrls: string[] = [] // Track URLs for cleanup
+// Counts "this is the line to play now". Every new line (and every stop) moves it on, so a line that is still
+// downloading, decoding or waiting to start when another one is requested sees it has been superseded and stays
+// silent. Without it, tapping one play button and then another played both at once.
+let playToken = 0
 // (Removed) thinking filler audio ("hmm...", etc.)
 
 // Map UI speed to actual TTS speed
@@ -170,6 +174,7 @@ export function getAudioContext(): AudioContext {
 
 // Stop all audio immediately (for interruption)
 export function stopAllAudio() {
+  playToken++
   endPlayback()
   if (currentAudio) {
     currentAudio.pause()
@@ -699,6 +704,9 @@ export function useApi() {
     preloadedAudio?: string
   ) => {
     console.log(preloadedAudio ? `[TTS] Playing the voice that came with the reply: "${text}"` : `[TTS] Sending to TTS API: "${text}"`)
+    // (Runs in the same tick as the stopAllAudio() that began this line, so this is this line's own number.)
+    const myToken = playToken
+    const superseded = () => myToken !== playToken
     let playbackStartFired = false
     const firePlaybackStart = () => {
       if (playbackStartFired) return
@@ -735,6 +743,7 @@ export function useApi() {
           cacheAudio(key, audioBase64)
         }
       }
+      if (superseded()) return // another line was requested while this one was downloading
       const audioData = atob(audioBase64)
       const audioArray = new Uint8Array(audioData.length)
       for (let i = 0; i < audioData.length; i++) {
@@ -764,6 +773,7 @@ export function useApi() {
         // after the microphone has been used iOS leaves that context "interrupted", which made every
         // sound wait for the unlock to give up (up to ~2 s) before it played.
         if (!audioUnlocked) await unlockAudio().catch(err => console.warn('[TTS] Audio unlock warning:', err))
+        if (superseded()) { URL.revokeObjectURL(audioUrl); return }
         
         await new Promise<void>((resolve) => {
           finishPlayback = () => { URL.revokeObjectURL(audioUrl); resolve() }
@@ -798,6 +808,7 @@ export function useApi() {
           audio.addEventListener('canplaythrough', () => {
             if (!playbackStarted) {
               playbackStarted = true
+              if (superseded()) return // stopped before it began (its wait has already ended)
               audio.play().then(() => {
                 console.log('[TTS] Audio playing via HTMLAudioElement')
                 voiceHandle = beginPlayback(envelope, () => audio.currentTime)
@@ -817,6 +828,7 @@ export function useApi() {
           setTimeout(() => {
             if (!playbackStarted) {
               playbackStarted = true
+              if (superseded()) return
               audio.play().then(() => {
                 console.log('[TTS] Audio playing via HTMLAudioElement (delayed)')
                 voiceHandle = beginPlayback(envelope, () => audio.currentTime)
@@ -851,6 +863,7 @@ export function useApi() {
           
           const arrayBuffer = await audioBlob.arrayBuffer()
           const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+          if (superseded()) { URL.revokeObjectURL(audioUrl); return }
           
           const source = ctx.createBufferSource()
           source.buffer = audioBuffer

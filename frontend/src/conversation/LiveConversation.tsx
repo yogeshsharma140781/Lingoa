@@ -101,6 +101,10 @@ export function LiveConversation() {
   const takerRef = useRef(taker)
   takerRef.current = taker
   const micOnRef = useRef(false)
+  // For the play buttons on the hint and alternative cards: which tap is the latest, and whether the mic
+  // was open before the first of them (so whichever tap finishes last puts it back).
+  const playIdRef = useRef(0)
+  const reopenMicAfterPlayRef = useRef(false)
   const initRef = useRef(false)
   const closingRef = useRef(false)
   const turnSpeechMsRef = useRef(0)
@@ -690,16 +694,25 @@ export function LiveConversation() {
     if (target === 'alternative') apiRef.current.logEvent('correction_heard', { ui: 'v2' })
     else apiRef.current.logEvent('suggestion_tapped', { index: target === 'hintAnswer' ? 0 : 1, ui: 'v2' })
     // The mic must be off while this plays, or it would hear the playback as the learner.
-    const reopen = micOnRef.current
+    // Tapping another play button while one is still going: the newest tap wins (the speech code stops the
+    // older line), and it alone puts things back afterwards, including the mic the first tap closed.
+    const id = ++playIdRef.current
+    if (micOnRef.current) reopenMicAfterPlayRef.current = true
+    const settle = micOnRef.current
     closeMic()
     setPlaying(target)
     try {
-      if (reopen) await sleep(MIC_SETTLE_MS)
+      if (settle) await sleep(MIC_SETTLE_MS)
+      if (playIdRef.current !== id) return // a newer tap arrived while the mic was settling
       await apiRef.current.textToSpeech(text)
     } finally {
-      setPlaying(null)
-      const name = stateRef.current.name
-      if (reopen && !closingRef.current && (name === 'hintShown' || name === 'userWaiting' || name === 'userListening')) openMic()
+      if (playIdRef.current === id) {
+        setPlaying(null)
+        const reopen = reopenMicAfterPlayRef.current
+        reopenMicAfterPlayRef.current = false
+        const name = stateRef.current.name
+        if (reopen && !closingRef.current && (name === 'hintShown' || name === 'userWaiting' || name === 'userListening')) openMic()
+      }
     }
   }, [hints, evaluation, language, closeMic, openMic])
 

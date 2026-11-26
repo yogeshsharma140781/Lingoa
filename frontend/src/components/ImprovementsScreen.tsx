@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowRight, Pause, Home, Lightbulb, Volume2 } from 'lucide-react'
 import { useStore } from '../store'
@@ -12,18 +12,26 @@ export function ImprovementsScreen() {
   const [audioUrls, setAudioUrls] = useState<Record<number, string>>({})
   const [audioElements, setAudioElements] = useState<Record<number, HTMLAudioElement>>({})
 
+  // The latest tap. A line still being fetched when another button is tapped must not start afterwards.
+  const tapRef = useRef(0)
+
   const playAudio = async (index: number, text: string) => {
+    const tap = ++tapRef.current
+
     // Stop currently playing audio
     if (playingIndex !== null && audioElements[playingIndex]) {
       audioElements[playingIndex].pause()
       audioElements[playingIndex].currentTime = 0
     }
 
-    // If clicking on currently playing, just stop
+    // If clicking on currently playing (or loading), just stop
     if (playingIndex === index) {
       setPlayingIndex(null)
       return
     }
+
+    // Show it as the active one straight away, even while its audio is still being made
+    setPlayingIndex(index)
 
     // Generate audio if not cached
     let url = audioUrls[index]
@@ -33,17 +41,19 @@ export function ImprovementsScreen() {
         setAudioUrls(prev => ({ ...prev, [index]: url }))
       }
     }
+    if (tapRef.current !== tap) return // another button (or Stop) was tapped meanwhile
 
     if (url) {
       let audio = audioElements[index]
       if (!audio) {
         audio = new Audio(url)
-        audio.onended = () => setPlayingIndex(null)
+        audio.onended = () => setPlayingIndex(current => (current === index ? null : current))
         setAudioElements(prev => ({ ...prev, [index]: audio }))
       }
-      
-      setPlayingIndex(index)
+      audio.currentTime = 0
       audio.play()
+    } else {
+      setPlayingIndex(null) // the audio could not be made
     }
   }
 
