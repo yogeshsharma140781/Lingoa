@@ -36,7 +36,11 @@ from tts_provider import (
     get_tts_provider_type,
     preprocess_text_for_speech,
     chunk_text_for_streaming,
-    ElevenLabsTTSProvider
+    ElevenLabsTTSProvider,
+    elevenlabs_paused,
+    elevenlabs_pause_status,
+    set_outage_handler,
+    ELEVENLABS_COOLDOWN_SECONDS,
 )
 
 # Check if we're in production (frontend is built)
@@ -1019,6 +1023,30 @@ async def _email_feedback(subject: str, body: str, reply_to: Optional[str]) -> b
     except Exception as e:
         print(f"[FEEDBACK] Email failed: {e}")
         return False
+
+
+async def _alert_elevenlabs_down(reason: str, detail: str) -> None:
+    """Email the developer that ElevenLabs stopped working (called at most once an hour)."""
+    if reason == "quota":
+        subject = "Lingoa: ElevenLabs credits are used up"
+        what = "ElevenLabs says the credits (characters) for this billing period are used up."
+        todo = "Top up or upgrade the plan at https://elevenlabs.io/app/subscription. The voice returns by itself within minutes."
+    else:
+        subject = "Lingoa: ElevenLabs refused the API key"
+        what = "ElevenLabs answered 401: the API key is invalid, or the account is blocked."
+        todo = "Check the ELEVENLABS_API_KEY on Render and the account status at https://elevenlabs.io/app."
+    minutes = max(1, ELEVENLABS_COOLDOWN_SECONDS // 60)
+    body = (
+        f"{what}\n\n"
+        "Lingoa has switched to the OpenAI voice (one voice for every language, noticeably worse for Hindi and Chinese). "
+        f"It tries ElevenLabs again every {minutes} minutes, so nothing needs restarting once this is fixed.\n\n"
+        f"What to do: {todo}\n\n"
+        f"ElevenLabs said: {detail[:500]}\n"
+    )
+    await _email_feedback(subject, body, None)
+
+
+set_outage_handler(_alert_elevenlabs_down)
 
 
 @app.post("/api/feedback")
@@ -3559,6 +3587,7 @@ async def synthesize_speech_bytes(text: str, language: str, speed: float) -> byt
         elevenlabs_key and len(elevenlabs_key) > 10
         and os.getenv("DISABLE_ELEVENLABS") != "true"
         and os.getenv("TTS_PROVIDER", "elevenlabs").lower() != "openai"
+        and not elevenlabs_paused()  # out of credits / bad key: straight to OpenAI for a few minutes
     )
 
     if use_elevenlabs:
@@ -3615,7 +3644,7 @@ async def elevenlabs_stream_tts(data: TextToSpeechRequest):
         tts = get_tts_provider(client)
         
         # Only ElevenLabs supports true streaming
-        if isinstance(tts, ElevenLabsTTSProvider):
+        if isinstance(tts, ElevenLabsTTSProvider) and not elevenlabs_paused():
             try:
                 async def audio_stream():
                     async for chunk in tts.stream_speech(data.text, data.language, data.speed):
@@ -4453,7 +4482,8 @@ async def tts_status():
             "provider": provider_type,
             "elevenlabs_configured": bool(elevenlabs_key and len(elevenlabs_key) > 10),
             "elevenlabs_disabled": disable_flag == "true",
-            "key_preview": elevenlabs_key[:15] + "..." if elevenlabs_key else None
+            "key_preview": elevenlabs_key[:15] + "..." if elevenlabs_key else None,
+            "elevenlabs_paused": elevenlabs_pause_status(),  # None, or why it is paused and for how many more seconds
         }
         
         # Test ElevenLabs API if configured

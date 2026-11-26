@@ -6,9 +6,11 @@ Supports ElevenLabs (primary) and OpenAI (fallback)
 import os
 import re
 import random
+import asyncio
+import time
 import httpx
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Optional, Dict, Any
+from typing import AsyncGenerator, Awaitable, Callable, Optional, Dict, Any
 from dataclasses import dataclass
 
 # ============ Configuration ============
@@ -196,6 +198,85 @@ class TTSProvider(ABC):
         """Stream speech audio chunks"""
         pass
 
+# ============ ElevenLabs outage: cooldown and alert ============
+# When ElevenLabs refuses because the credits are used up (or the key is bad), every line would otherwise
+# try it, fail, and only then fall back to OpenAI. Instead the first refusal "pauses" ElevenLabs for a few
+# minutes (speech goes straight to the fallback), then the next line tries it again. The first refusal also
+# calls the outage handler (main.py emails the developer), at most once an hour.
+
+ELEVENLABS_COOLDOWN_SECONDS = int(os.getenv("ELEVENLABS_COOLDOWN_SECONDS", "300"))
+OUTAGE_ALERT_INTERVAL_SECONDS = 3600
+
+
+class ElevenLabsUnavailable(Exception):
+    """ElevenLabs will keep refusing for a while (out of credits, or the key is bad / blocked)."""
+
+    def __init__(self, reason: str, detail: str):
+        super().__init__(detail)
+        self.reason = reason  # "quota", "key" or "paused"
+
+
+_paused_until = 0.0
+_pause_reason: Optional[str] = None
+_last_alert_at = 0.0
+_outage_handler: Optional[Callable[[str, str], Awaitable[None]]] = None
+_alert_tasks: set = set()  # keeps a reference to running alert tasks
+
+
+def set_outage_handler(handler: Optional[Callable[[str, str], Awaitable[None]]]) -> None:
+    """handler(reason, detail) is awaited (in the background) when ElevenLabs first goes out."""
+    global _outage_handler
+    _outage_handler = handler
+
+
+def elevenlabs_pause_status() -> Optional[dict]:
+    """None when ElevenLabs is being used; otherwise why it is paused and for how many more seconds."""
+    remaining = _paused_until - time.time()
+    if remaining <= 0:
+        return None
+    return {"reason": _pause_reason, "seconds_left": int(remaining)}
+
+
+def elevenlabs_paused() -> bool:
+    return elevenlabs_pause_status() is not None
+
+
+def _classify_failure(status_code: int, body: str) -> Optional[str]:
+    """'quota' (credits used up), 'key' (invalid or blocked key), or None (a failure worth no pause)."""
+    lowered = body.lower()
+    if status_code == 402 or "quota_exceeded" in lowered or "exceeds your quota" in lowered:
+        return "quota"
+    if status_code == 401:
+        return "key"
+    return None
+
+
+def _trip(reason: str, detail: str) -> None:
+    """Pause ElevenLabs and, the first time (and at most hourly), call the outage handler."""
+    global _paused_until, _pause_reason, _last_alert_at
+    now = time.time()
+    already_paused = now < _paused_until
+    _paused_until = now + ELEVENLABS_COOLDOWN_SECONDS
+    _pause_reason = reason
+    if already_paused:
+        return  # several requests failing together: one pause, one alert
+    print(f"[ELEVENLABS] Pausing ElevenLabs for {ELEVENLABS_COOLDOWN_SECONDS}s ({reason}): {detail[:200]}")
+    if _outage_handler and now - _last_alert_at >= OUTAGE_ALERT_INTERVAL_SECONDS:
+        _last_alert_at = now
+        try:
+            task = asyncio.get_running_loop().create_task(_outage_handler(reason, detail))
+            _alert_tasks.add(task)
+            task.add_done_callback(_alert_tasks.discard)
+        except Exception as e:
+            print(f"[ELEVENLABS] Could not start the outage alert: {e}")
+
+
+def _raise_if_paused() -> None:
+    status = elevenlabs_pause_status()
+    if status:
+        raise ElevenLabsUnavailable("paused", f"ElevenLabs paused ({status['reason']}), {status['seconds_left']}s left")
+
+
 # ============ ElevenLabs Provider ============
 
 class ElevenLabsTTSProvider(TTSProvider):
@@ -264,9 +345,13 @@ class ElevenLabsTTSProvider(TTSProvider):
                 error_text = response.text[:500] if hasattr(response, 'text') else str(response.content[:500])
                 print(f"[ELEVENLABS ERROR] Model {model_id}, status {response.status_code}: {error_text}")
 
-                # If it's a 401 (unauthorized/blocked), raise a specific exception
-                if response.status_code == 401:
-                    raise Exception(f"ElevenLabs account blocked or invalid API key. Status {response.status_code}: {error_text}")
+                reason = _classify_failure(response.status_code, error_text)
+                if reason == "quota":
+                    _trip(reason, f"Status {response.status_code}: {error_text}")
+                    raise ElevenLabsUnavailable(reason, f"ElevenLabs credits used up. Status {response.status_code}: {error_text}")
+                if reason == "key":
+                    _trip(reason, f"Status {response.status_code}: {error_text}")
+                    raise ElevenLabsUnavailable(reason, f"ElevenLabs account blocked or invalid API key. Status {response.status_code}: {error_text}")
 
                 raise Exception(f"ElevenLabs API error: {response.status_code} - {error_text}")
 
@@ -283,6 +368,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         speed: float = 1.0
     ) -> bytes:
         """Generate speech using ElevenLabs (the language's own model, then the fallback model)"""
+        _raise_if_paused()
         # Pre-process text for natural speech
         processed_text = preprocess_text_for_speech(text, language)
         voice_id = self._get_voice_id(language)
@@ -293,8 +379,8 @@ class ElevenLabsTTSProvider(TTSProvider):
                 return await self._generate_once(processed_text, voice_id, model_id, voice_settings)
             except Exception as e:
                 is_last = index == len(attempts) - 1
-                # A blocked or invalid key will fail with the other model too.
-                if is_last or "blocked or invalid API key" in str(e):
+                # Used-up credits or a bad key fail with the other model too.
+                if is_last or isinstance(e, ElevenLabsUnavailable):
                     raise
                 print(f"[ELEVENLABS] {model_id} failed for {language}, falling back to {attempts[index + 1][0]}")
         raise Exception("ElevenLabs: no model attempted")  # unreachable: attempts is never empty
@@ -306,6 +392,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         speed: float = 1.0
     ) -> AsyncGenerator[bytes, None]:
         """Stream speech using ElevenLabs streaming API"""
+        _raise_if_paused()
         # Pre-process text for natural speech
         processed_text = preprocess_text_for_speech(text, language)
         voice_id = self._get_voice_id(language)
@@ -333,6 +420,10 @@ class ElevenLabsTTSProvider(TTSProvider):
                     ) as response:
                         if response.status_code != 200:
                             error_text = await response.aread()
+                            reason = _classify_failure(response.status_code, error_text.decode("utf-8", "replace"))
+                            if reason:
+                                _trip(reason, f"Status {response.status_code}: {error_text[:300]!r}")
+                                raise ElevenLabsUnavailable(reason, f"ElevenLabs streaming refused ({reason}). Status {response.status_code}")
                             raise Exception(f"ElevenLabs streaming error: {response.status_code} - {error_text}")
 
                         async for chunk in response.aiter_bytes(chunk_size=4096):
@@ -341,7 +432,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                                 yield chunk
                 return
             except Exception as e:
-                if started or index == len(attempts) - 1:
+                if started or index == len(attempts) - 1 or isinstance(e, ElevenLabsUnavailable):
                     raise
                 print(f"[ELEVENLABS] {model_id} stream failed for {language} ({e}), falling back to {attempts[index + 1][0]}")
     
